@@ -1,0 +1,13 @@
+{
+  "domain": "filter_tracker",
+  "name": "Filter Tracker",
+  "version": "0.1.1",
+  "documentation": "https://github.com/bhaggs/ha-filter-tracker",
+  "issue_tracker": "https://github.com/bhaggs/ha-filter-tracker/issues",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": ["@bhaggs"],
+  "config_flow": true,
+  "iot_class": "calculated",
+  "homeassistant": "2024.1.0"
+}

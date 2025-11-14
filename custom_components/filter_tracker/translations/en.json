@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "New filter",
+        "data": {
+          "name": "Filter name",
+          "install_date": "Install date",
+          "lifespan_amount": "Lifespan amount",
+          "lifespan_unit": "Lifespan unit",
+          "filter_type": "Filter type",
+          "filter_size": "Filter size (optional)",
+          "manufacturer": "Manufacturer (optional)"
+        },
+        "data_description": {
+          "name": "Friendly name (e.g., Bedroom air purifier)",
+          "filter_type": "Type of filter (e.g., HEPA, MERV11, Carbon)",
+          "filter_size": "Physical dimensions (e.g., 16x25x1, 20x20x1)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "name": "Filter name",
+          "lifespan_amount": "Lifespan amount",
+          "lifespan_unit": "Lifespan unit",
+          "filter_type": "Filter type",
+          "filter_size": "Filter size (optional)",
+          "manufacturer": "Manufacturer (optional)"
+        },
+        "data_description": {
+          "name": "Friendly name (e.g., Bedroom air purifier)",
+          "filter_type": "Type of filter (e.g., HEPA, MERV11, Carbon)",
+          "filter_size": "Physical dimensions (e.g., 16x25x1, 20x20x1)"
+        }
+      }
+    }
+  },
+  "errors": {}
+}

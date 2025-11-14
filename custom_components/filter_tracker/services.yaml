@@ -1,0 +1,19 @@
+set_filter_replaced:
+  name: Set Filter Replaced
+  description: Update the install/replacement date for a filter.
+  fields:
+    device_id:
+      name: Device
+      description: Target Filter device.
+      selector:
+        device:
+          integration: filter_tracker
+    entry_id:
+      name: Config Entry
+      description: Specific config entry ID to update (alternative to selecting a device).
+      example: 1234567890abcdef
+    replacement_datetime:
+      name: Replacement Date/Time
+      description: When the filter was replaced. Defaults to now if omitted.
+      selector:
+        datetime: {}
