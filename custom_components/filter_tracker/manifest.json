@@ -1,12 +1,12 @@
 {
   "domain": "filter_tracker",
   "name": "Filter Tracker",
-  "version": "0.5.0",
-  "documentation": "https://github.com/bhaggs/ha-filter-tracker",
-  "issue_tracker": "https://github.com/bhaggs/ha-filter-tracker/issues",
-  "requirements": [],
-  "dependencies": [],
   "codeowners": ["@bhaggs"],
   "config_flow": true,
-  "iot_class": "calculated"
+  "dependencies": [],
+  "documentation": "https://github.com/bhaggs/ha-filter-tracker",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/bhaggs/ha-filter-tracker/issues",
+  "requirements": [],
+  "version": "0.5.0"
 }
