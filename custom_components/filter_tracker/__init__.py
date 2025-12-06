@@ -31,6 +31,10 @@ _LOGGER = logging.getLogger(__name__)
 
 DATA_SERVICE_REGISTERED = "service_registered"
 
+# This integration is configured via config entries (UI)
+# async_setup exists only for service registration
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 def _validate_service_data(data: dict) -> dict:
     """Validate that only one of entry_id or device_id is provided."""
     if ATTR_ENTRY_ID in data and ATTR_DEVICE_ID in data:

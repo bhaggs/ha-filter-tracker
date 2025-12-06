@@ -8,6 +8,5 @@
   "dependencies": [],
   "codeowners": ["@bhaggs"],
   "config_flow": true,
-  "iot_class": "calculated",
-  "homeassistant": "2024.1.0"
+  "iot_class": "calculated"
 }
