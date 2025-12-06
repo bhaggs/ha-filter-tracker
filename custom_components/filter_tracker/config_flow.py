@@ -18,6 +18,7 @@ from .const import (
     CONF_FILTER_TYPE,
     CONF_FILTER_SIZE,
     CONF_MANUFACTURER,
+    CONF_USAGE_SENSOR,
     LIFESPAN_UNIT_FACTORS,
     get_config_update_signal,
 )
@@ -71,6 +72,7 @@ def _build_schema(
         filter_type_default = existing_data.get(CONF_FILTER_TYPE, "")
         filter_size_default = existing_data.get(CONF_FILTER_SIZE, "")
         manufacturer_default = existing_data.get(CONF_MANUFACTURER, "")
+        usage_sensor_default = existing_data.get(CONF_USAGE_SENSOR, "")
 
         # Reverse-engineer lifespan amount/unit from stored days
         lifespan_days = existing_data.get(CONF_LIFESPAN_DAYS, 90)
@@ -81,6 +83,7 @@ def _build_schema(
         filter_type_default = None
         filter_size_default = None
         manufacturer_default = None
+        usage_sensor_default = None
         lifespan_amount = 3
         lifespan_unit = "months"
 
@@ -99,6 +102,9 @@ def _build_schema(
         schema_dict[vol.Required(CONF_FILTER_TYPE, default=filter_type_default)] = str
         schema_dict[vol.Optional(CONF_FILTER_SIZE, default=filter_size_default)] = str
         schema_dict[vol.Optional(CONF_MANUFACTURER, default=manufacturer_default)] = str
+        schema_dict[vol.Optional(CONF_USAGE_SENSOR, description={"suggested_value": usage_sensor_default})] = selector({
+            "entity": {"domain": ["binary_sensor", "input_boolean", "switch", "fan", "climate"]}
+        })
     else:
         # Initial setup - name and lifespan are required
         schema_dict[vol.Required(CONF_NAME)] = str
@@ -119,6 +125,9 @@ def _build_schema(
         schema_dict[vol.Required(CONF_FILTER_TYPE)] = str
         schema_dict[vol.Optional(CONF_FILTER_SIZE)] = str
         schema_dict[vol.Optional(CONF_MANUFACTURER)] = str
+        schema_dict[vol.Optional(CONF_USAGE_SENSOR)] = selector({
+            "entity": {"domain": ["binary_sensor", "input_boolean", "switch", "fan", "climate"]}
+        })
 
     return vol.Schema(schema_dict)
 
@@ -182,12 +191,16 @@ class FilterTrackerOptionsFlow(config_entries.OptionsFlow):
                 # Remove the amount and unit from options since we store days
                 user_input.pop(CONF_LIFESPAN_AMOUNT, None)
                 user_input.pop(CONF_LIFESPAN_UNIT, None)
+            
+            # Normalize empty string to None for usage_sensor (entity selector sends "" when cleared)
+            if CONF_USAGE_SENSOR not in user_input:
+                user_input[CONF_USAGE_SENSOR] = None
 
             # Merge new values with existing data
             updated_data = {**self.config_entry.data}
 
             # Update each field if provided (allow empty strings to clear optional fields)
-            for key in [CONF_NAME, CONF_LIFESPAN_DAYS, CONF_FILTER_TYPE, CONF_FILTER_SIZE, CONF_MANUFACTURER]:
+            for key in [CONF_NAME, CONF_LIFESPAN_DAYS, CONF_FILTER_TYPE, CONF_FILTER_SIZE, CONF_MANUFACTURER, CONF_USAGE_SENSOR]:
                 if key in user_input:
                     updated_data[key] = user_input[key]
 
@@ -207,6 +220,28 @@ class FilterTrackerOptionsFlow(config_entries.OptionsFlow):
                 title=new_title,
                 data=updated_data
             )
+
+            # Check if usage sensor was added or removed (requires reload to create/remove entity)
+            old_usage_sensor = self.config_entry.data.get(CONF_USAGE_SENSOR)
+            new_usage_sensor = updated_data.get(CONF_USAGE_SENSOR)
+
+            # Detect if usage sensor was added or removed (not just changed)
+            usage_sensor_added = not old_usage_sensor and new_usage_sensor
+            usage_sensor_removed = old_usage_sensor and not new_usage_sensor
+
+            if usage_sensor_added or usage_sensor_removed:
+                _LOGGER.info(
+                    "Usage sensor %s for filter %s, reloading config entry to %s usage hours entity",
+                    "added" if usage_sensor_added else "removed",
+                    updated_data.get(CONF_NAME),
+                    "create" if usage_sensor_added else "remove"
+                )
+                # Schedule reload after options flow completes
+                self.hass.async_create_task(
+                    self.hass.config_entries.async_reload(self.config_entry.entry_id)
+                )
+                # Return early - reload will handle state updates
+                return self.async_create_entry(title="", data={})
 
             # Schedule signal dispatch to happen AFTER options flow completes
             # This ensures the event loop can process scheduled state updates

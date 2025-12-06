@@ -13,9 +13,11 @@ from .const import (
     CONF_FILTER_SIZE,
     CONF_MANUFACTURER,
     CONF_NAME,
+    CONF_USAGE_SENSOR,
     get_install_update_signal,
+    get_usage_update_signal,
 )
-from .tracker_data import async_save_install_datetime
+from .tracker_data import async_save_install_datetime, async_reset_usage_data
 from .base import BaseFilterEntity, BaseEntityMeta
 
 @dataclass
@@ -70,7 +72,8 @@ class FilterResetInstallDateButton(BaseFilterEntity[ButtonMeta], ButtonEntity):
         self._config_entry = config_entry
 
     async def async_press(self) -> None:
-        """Handle button press to reset install date."""
+        """Handle button press to reset install date and usage time."""
+        # Reset install datetime
         utc_value = await async_save_install_datetime(
             self.hass,
             self._config_entry.entry_id,
@@ -81,3 +84,12 @@ class FilterResetInstallDateButton(BaseFilterEntity[ButtonMeta], ButtonEntity):
             get_install_update_signal(self._config_entry.entry_id),
             dt_util.as_local(utc_value),
         )
+
+        # Reset usage time if usage sensor is configured
+        if self._config_entry.data.get(CONF_USAGE_SENSOR):
+            await async_reset_usage_data(self.hass, self._config_entry.entry_id)
+            async_dispatcher_send(
+                self.hass,
+                get_usage_update_signal(self._config_entry.entry_id),
+                {"accumulated_seconds": 0.0, "usage_sensor_last_changed": None, "last_sensor_state": "off"},
+            )

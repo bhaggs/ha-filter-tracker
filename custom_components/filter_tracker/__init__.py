@@ -14,13 +14,18 @@ from .const import (
     DOMAIN,
     PLATFORMS,
     SERVICE_SET_FILTER_REPLACED,
+    SERVICE_SET_USAGE_TIME,
     ATTR_DEVICE_ID,
     ATTR_ENTRY_ID,
     ATTR_REPLACEMENT_DATETIME,
+    ATTR_USAGE_HOURS,
+    ATTR_ADJUST_HOURS,
+    CONF_USAGE_SENSOR,
     DATA_ENTRIES,
     get_install_update_signal,
+    get_usage_update_signal,
 )
-from .tracker_data import async_save_install_datetime, _get_store
+from .tracker_data import async_save_install_datetime, async_load_usage_data, async_save_usage_data, _get_store, _get_usage_store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,6 +41,25 @@ def _validate_service_data(data: dict) -> dict:
     return data
 
 
+def _validate_usage_time_data(data: dict) -> dict:
+    """Validate usage time service data."""
+    # Check entry_id/device_id
+    if ATTR_ENTRY_ID in data and ATTR_DEVICE_ID in data:
+        raise vol.Invalid(
+            f"Cannot specify both '{ATTR_ENTRY_ID}' and '{ATTR_DEVICE_ID}'. "
+            "Please provide only one."
+        )
+
+    # Check usage_hours/adjust_hours
+    if ATTR_USAGE_HOURS in data and ATTR_ADJUST_HOURS in data:
+        raise vol.Invalid(
+            f"Cannot specify both '{ATTR_USAGE_HOURS}' and '{ATTR_ADJUST_HOURS}'. "
+            "Please provide only one."
+        )
+
+    return data
+
+
 SET_FILTER_REPLACED_SCHEMA = vol.All(
     vol.Schema(
         {
@@ -46,6 +70,20 @@ SET_FILTER_REPLACED_SCHEMA = vol.All(
     ),
     cv.has_at_least_one_key(ATTR_ENTRY_ID, ATTR_DEVICE_ID),
     _validate_service_data,
+)
+
+SET_USAGE_TIME_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Optional(ATTR_ENTRY_ID): cv.string,
+            vol.Optional(ATTR_DEVICE_ID): cv.string,
+            vol.Optional(ATTR_USAGE_HOURS): vol.All(vol.Coerce(float), vol.Range(min=0)),
+            vol.Optional(ATTR_ADJUST_HOURS): vol.Coerce(float),
+        }
+    ),
+    cv.has_at_least_one_key(ATTR_ENTRY_ID, ATTR_DEVICE_ID),
+    cv.has_at_least_one_key(ATTR_USAGE_HOURS, ATTR_ADJUST_HOURS),
+    _validate_usage_time_data,
 )
 
 
@@ -76,9 +114,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        # Clean up storage file
+        # Clean up storage files
         store = _get_store(hass, entry.entry_id)
         await store.async_remove()
+
+        usage_store = _get_usage_store(hass, entry.entry_id)
+        await usage_store.async_remove()
 
         # Clean up in-memory data
         domain_data = hass.data.get(DOMAIN, {})
@@ -106,12 +147,23 @@ async def _async_register_services(hass: HomeAssistant) -> None:
     async def async_handle_set_filter_replaced(call: ServiceCall) -> None:
         await _async_handle_set_filter_replaced(hass, call)
 
+    async def async_handle_set_usage_time(call: ServiceCall) -> None:
+        await _async_handle_set_usage_time(hass, call)
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_SET_FILTER_REPLACED,
         async_handle_set_filter_replaced,
         schema=SET_FILTER_REPLACED_SCHEMA,
     )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_USAGE_TIME,
+        async_handle_set_usage_time,
+        schema=SET_USAGE_TIME_SCHEMA,
+    )
+
     domain_data[DATA_SERVICE_REGISTERED] = True
 
 
@@ -121,6 +173,7 @@ async def _async_unregister_services(hass: HomeAssistant) -> None:
         return
 
     hass.services.async_remove(DOMAIN, SERVICE_SET_FILTER_REPLACED)
+    hass.services.async_remove(DOMAIN, SERVICE_SET_USAGE_TIME)
     domain_data[DATA_SERVICE_REGISTERED] = False
 
 
@@ -158,4 +211,98 @@ async def _async_handle_set_filter_replaced(hass: HomeAssistant, call: ServiceCa
         hass,
         get_install_update_signal(entry_id),
         dt_util.as_local(utc_value),
+    )
+
+
+async def _async_handle_set_usage_time(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Handle the set_usage_time service call."""
+    domain_data = hass.data.get(DOMAIN)
+    if not domain_data:
+        raise HomeAssistantError("Filter Tracker is not set up.")
+
+    entries: dict = domain_data.get(DATA_ENTRIES, {})
+
+    entry_id: str | None = call.data.get(ATTR_ENTRY_ID)
+    device_id: str | None = call.data.get(ATTR_DEVICE_ID)
+
+    # Resolve entry_id from device_id if needed
+    if not entry_id and device_id:
+        dev_reg = dr.async_get(hass)
+        device = dev_reg.async_get(device_id)
+        if not device:
+            raise HomeAssistantError("Device not found.")
+        for domain, dev_entry_id in device.identifiers:
+            if domain == DOMAIN:
+                entry_id = dev_entry_id
+                break
+
+    if not entry_id or entry_id not in entries:
+        raise HomeAssistantError("Filter Tracker entry not found.")
+
+    # Check if filter has usage sensor configured
+    config_entry = hass.config_entries.async_get_entry(entry_id)
+    if not config_entry or not config_entry.data.get(CONF_USAGE_SENSOR):
+        raise HomeAssistantError(
+            "Filter does not have a usage sensor configured. "
+            "Cannot set usage time for calendar-only filters."
+        )
+
+    # Load current usage data
+    usage_data = await async_load_usage_data(hass, entry_id)
+    if not usage_data:
+        usage_data = {
+            "accumulated_seconds": 0.0,
+            "usage_sensor_last_changed": None,
+            "last_sensor_state": "off",
+        }
+
+    current_seconds = usage_data.get("accumulated_seconds", 0.0)
+
+    # Calculate new usage time
+    usage_hours = call.data.get(ATTR_USAGE_HOURS)
+    adjust_hours = call.data.get(ATTR_ADJUST_HOURS)
+
+    if usage_hours is not None:
+        # Set absolute value
+        new_seconds = usage_hours * 3600
+    elif adjust_hours is not None:
+        # Add/subtract from current value
+        new_seconds = current_seconds + (adjust_hours * 3600)
+    else:
+        raise HomeAssistantError("Must provide either usage_hours or adjust_hours.")
+
+    # Clamp to minimum of 0
+    if new_seconds < 0:
+        _LOGGER.warning(
+            "Usage time would be negative (%.2f hours), clamping to 0",
+            new_seconds / 3600,
+        )
+        new_seconds = 0.0
+
+    # Save updated usage data
+    # Reset timestamp to now to restart dynamic accumulation timer
+    await async_save_usage_data(
+        hass,
+        entry_id,
+        accumulated_seconds=new_seconds,
+        last_changed=dt_util.utcnow(),
+        last_state=usage_data.get("last_sensor_state", "off"),
+    )
+
+    # Dispatch signal to update entities
+    # Send current timestamp to reset dynamic accumulation timer
+    async_dispatcher_send(
+        hass,
+        get_usage_update_signal(entry_id),
+        {
+            "accumulated_seconds": new_seconds,
+            "usage_sensor_last_changed": dt_util.utcnow(),
+            "last_sensor_state": usage_data.get("last_sensor_state", "off"),
+        },
+    )
+
+    _LOGGER.info(
+        "Updated usage time for filter %s: %.2f hours",
+        entry_id,
+        new_seconds / 3600,
     )

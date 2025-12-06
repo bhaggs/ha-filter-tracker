@@ -8,6 +8,7 @@ CONF_LIFESPAN_UNIT = "lifespan_unit"
 CONF_FILTER_TYPE = "filter_type"
 CONF_FILTER_SIZE = "filter_size"
 CONF_MANUFACTURER = "manufacturer"
+CONF_USAGE_SENSOR = "usage_sensor"
 
 # Lifespan unit conversion factors
 # Note: These are approximate conversions for simplicity:
@@ -24,14 +25,22 @@ LIFESPAN_UNIT_FACTORS = {
 
 PLATFORMS = ["sensor", "binary_sensor", "button", "calendar"]
 
+# Climate states that count as "active" for usage tracking
+# These states indicate the HVAC system is actively running
+CLIMATE_ACTIVE_STATES = ["heat", "cool", "heat_cool", "dry", "fan_only", "auto"]
+
 SERVICE_SET_FILTER_REPLACED = "set_filter_replaced"
+SERVICE_SET_USAGE_TIME = "set_usage_time"
 ATTR_ENTRY_ID = "entry_id"
 ATTR_DEVICE_ID = "device_id"
 ATTR_REPLACEMENT_DATETIME = "replacement_datetime"
+ATTR_USAGE_HOURS = "usage_hours"
+ATTR_ADJUST_HOURS = "adjust_hours"
 
 DATA_ENTRIES = "entries"
 SIGNAL_INSTALL_UPDATED = "filter_tracker_install_updated"
 SIGNAL_CONFIG_UPDATED = "filter_tracker_config_updated"
+SIGNAL_USAGE_UPDATED = "filter_tracker_usage_updated"
 
 
 def get_install_update_signal(entry_id: str) -> str:
@@ -40,3 +49,7 @@ def get_install_update_signal(entry_id: str) -> str:
 
 def get_config_update_signal(entry_id: str) -> str:
     return f"{SIGNAL_CONFIG_UPDATED}_{entry_id}"
+
+
+def get_usage_update_signal(entry_id: str) -> str:
+    return f"{SIGNAL_USAGE_UPDATED}_{entry_id}"

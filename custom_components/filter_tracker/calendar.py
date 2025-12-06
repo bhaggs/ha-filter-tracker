@@ -29,10 +29,22 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Filter Tracker calendar from config entry."""
-    # Create a single calendar entity that shows all filters
-    calendar = FilterTrackerCalendar(hass)
-    async_add_entities([calendar])
+    """Set up Filter Tracker calendar - creates one calendar for entire integration."""
+
+    # Ensure domain data exists
+    if DOMAIN not in hass.data:
+        hass.data[DOMAIN] = {}
+
+    # Only create calendar once across all config entries
+    if "calendar_created" not in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["calendar_created"] = True
+
+        # Create single calendar showing all filters
+        calendar = FilterTrackerCalendar(hass)
+        async_add_entities([calendar])
+        _LOGGER.debug("Created integration-level Filter Tracker calendar")
+    else:
+        _LOGGER.debug("Calendar already exists, skipping creation for entry %s", config_entry.entry_id)
 
 
 class FilterTrackerCalendar(CalendarEntity):

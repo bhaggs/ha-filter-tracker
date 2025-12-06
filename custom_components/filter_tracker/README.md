@@ -6,13 +6,15 @@ A Home Assistant custom integration for tracking household filters that need reg
 
 - **Track Multiple Filters**: Add unlimited filters with different replacement schedules
 - **Flexible Scheduling**: Set lifespan in days, weeks, months, or years
+- **Usage Time Tracking** (optional): Track actual runtime using binary sensors, switches, or climate entities
 - **Comprehensive Entity Support**:
-  - 5 sensors per filter (install date, due date, days remaining, percentage remaining, filter type)
+  - Up to 6 sensors per filter (install date, due date, days remaining, percentage remaining, filter type, usage time)
   - Binary sensor for expired status
-  - Button to mark filter as replaced
+  - Button to mark filter as replaced and reset replacement due date
   - Unified calendar showing all filter due dates
 - **Rich Metadata**: Track filter type, physical size, and manufacturer
 - **Easy Reset**: Button entity and service to mark filter as replaced with custom date/time support
+- **Manual Usage Adjustment**: Service to manually set or adjust accumulated usage time
 - **Calendar Integration**: View all filter replacement due dates in Home Assistant's calendar view
 - **Automation Ready**: Use sensors, binary sensors, calendar, and services to create reminders and automations
 
@@ -43,12 +45,13 @@ A Home Assistant custom integration for tracking household filters that need reg
 3. Search for "Filter Tracker"
 4. Fill in the form:
    - **Filter Name**: Descriptive name (e.g., "Living Room Air Purifier")
-   - **Install Date**: When the filter was installed or replaced
+   - **Install Date**: When the filter was installed or last replaced
    - **Lifespan Amount**: How long the filter lasts (number)
    - **Lifespan Unit**: Days, weeks, months, or years
-   - **Filter Type**: Type of filter (e.g., "HEPA", "MERV11", "Carbon") - **Required**
+   - **Filter Type**: Type of filter (e.g., "HEPA", "MERV11", "Carbon")
    - **Filter Size** (optional): Physical dimensions (e.g., "16x25x1", "20x20x1")
    - **Manufacturer** (optional): Filter manufacturer
+   - **Usage Sensor** (optional): Entity to track filter usage time (binary_sensor, input_boolean, switch, fan, or climate)
 
 ### Editing a Filter
 
@@ -56,8 +59,12 @@ A Home Assistant custom integration for tracking household filters that need reg
 2. Find the Filter Tracker integration
 3. Click on a specific filter entry
 4. Click "Configure"
-5. Update any settings (name, lifespan, filter type, filter size, manufacturer)
+5. Update any settings (name, lifespan, filter type, filter size, manufacturer, usage sensor)
    - Note: Install date cannot be changed via options flow - use the service or button instead
+   - **Usage Sensor**: Can be added, changed, or removed at any time
+     - Adding or removing a usage sensor triggers an integration reload
+     - Changing from one sensor to another preserves accumulated usage time
+     - Removing the usage sensor resets accumulated time to zero
 
 ### Deleting a Filter
 
@@ -101,6 +108,29 @@ For each filter, the following entities are created:
      - `replacement_due_date`: When replacement is due (ISO format)
      - `filter_size`: Physical dimensions (if specified)
      - `manufacturer`: Manufacturer name
+
+6. **Filter Usage Time** (`sensor.<name>_usage_time`) - **Conditional**
+   - Type: Duration sensor (hours)
+   - Device class: `duration`
+   - **Only created when a usage sensor is configured**
+   - Shows accumulated runtime in hours (rounded to 2 decimal places)
+   - State updates in real-time when usage entity is active
+   - Contains rich state attributes with usage tracking metadata:
+     - `usage_sensor`: Entity ID being tracked (e.g., `binary_sensor.hvac_running`)
+     - `usage_sensor_state`: Current state of tracked entity (`on`, `off`, `heat`, etc.)
+     - `usage_sensor_available`: Whether tracked entity is currently available (boolean)
+     - `usage_sensor_last_changed`: ISO timestamp when tracked entity last changed state
+     - `accumulated_seconds`: Total accumulated usage in seconds (precise value)
+
+**How Usage Tracking Works:**
+- Tracks when the configured entity is in an active state
+- For `binary_sensor`, `switch`, `input_boolean`, `fan`: `on` = active
+- For `climate` entities: `heat`, `cool`, `heat_cool`, `dry`, `fan_only`, `auto` = active
+- Time accumulates only when entity is in active state
+- Accumulation pauses when entity becomes `unavailable` or `unknown`
+- Real-time calculation includes current running time if entity is currently active
+- Data persists across Home Assistant restarts
+- Can be manually adjusted using the `set_usage_time` service
 
 #### Binary Sensor
 
@@ -158,6 +188,49 @@ data:
   replacement_datetime: "2025-01-15 14:30:00"
 ```
 
+#### `filter_tracker.set_usage_time`
+
+Set or adjust accumulated usage time for a filter with usage tracking enabled.
+
+**Prerequisites:**
+- Filter must have a usage sensor configured
+- Cannot be used with calendar-only filters (will raise an error)
+
+**Parameters:**
+- `entry_id` (optional): Config entry ID to target (use `entry_id` OR `device_id`)
+- `device_id` (optional): Filter device to target (use `entry_id` OR `device_id`)
+- `usage_hours` (optional): Set usage time to this absolute value in hours (use `usage_hours` OR `adjust_hours`)
+- `adjust_hours` (optional): Adjust existing usage time by adding (positive) or subtracting (negative) hours (use `usage_hours` OR `adjust_hours`)
+
+**Important:**
+- Must provide exactly ONE of: `entry_id` or `device_id`
+- Must provide exactly ONE of: `usage_hours` or `adjust_hours`
+- `usage_hours` must be ≥ 0
+- `adjust_hours` can be negative, but the result is clamped to 0 (warning logged if clamped)
+- Resets the accumulation timer to the current moment
+
+**Example Service Calls:**
+
+```yaml
+# Set usage to exactly 150 hours
+service: filter_tracker.set_usage_time
+data:
+  device_id: "xyz789"
+  usage_hours: 150
+
+# Add 10 hours to current usage
+service: filter_tracker.set_usage_time
+data:
+  device_id: "xyz789"
+  adjust_hours: 10
+
+# Subtract 5 hours from current usage
+service: filter_tracker.set_usage_time
+data:
+  entry_id: "abc123"
+  adjust_hours: -5
+```
+
 ## Automation Examples
 
 ### Send Notification When Filter Expires
@@ -190,20 +263,6 @@ automation:
         data:
           title: "Filter Replacement Soon"
           message: "Furnace filter needs replacement in {{ states('sensor.furnace_filter_filter_life_days_remaining') }} days"
-```
-
-### Auto-Reset After Filter Replacement
-
-```yaml
-automation:
-  - alias: "Reset water filter tracker after replacement"
-    trigger:
-      - platform: event
-        event_type: physical_filter_replaced  # Your custom event
-    action:
-      - service: filter_tracker.set_filter_replaced
-        data:
-          device_id: "abc123"
 ```
 
 ### Create a Filter Maintenance Dashboard
@@ -249,24 +308,12 @@ automation:
           message: "{{ trigger.calendar_event.summary }}"
 ```
 
-### Access Filter Metadata
-
-Use the diagnostic sensor to access all filter information:
-
-```yaml
-# Template to get filter size
-{{ state_attr('sensor.furnace_filter_filter_type', 'filter_size') }}
-
-# Template to check days until replacement
-{{ state_attr('sensor.furnace_filter_filter_type', 'rated_lifespan_days') }}
-```
-
 ## State Attributes
 
 The **Filter Type** diagnostic sensor includes comprehensive state attributes:
 
-- `rated_lifespan_days`: Total lifespan of the filter in days
 - `install_date`: When the filter was installed (ISO format timestamp)
+- `rated_lifespan_days`: Total lifespan of the filter in days
 - `replacement_due_date`: When filter replacement is due (ISO format timestamp)
 - `filter_size`: Physical dimensions of the filter (e.g., "16x25x1", null if not specified)
 - `manufacturer`: Manufacturer name
@@ -281,6 +328,29 @@ To access these attributes in templates or automations:
 {{ state_attr('sensor.furnace_filter_filter_type', 'rated_lifespan_days') }}
 ```
 
+### Usage Time Sensor Attributes
+
+The **Usage Time** sensor (when configured) includes these state attributes:
+
+- `usage_sensor`: Entity ID being tracked (e.g., `binary_sensor.hvac_running`)
+- `usage_sensor_state`: Current state of tracked entity (`on`, `off`, `heat`, etc.)
+- `usage_sensor_available`: Whether tracked entity is currently available (boolean)
+- `usage_sensor_last_changed`: ISO timestamp when tracked entity last changed state
+- `accumulated_seconds`: Total accumulated usage in seconds (precise value)
+
+To access these attributes in templates or automations:
+
+```yaml
+# Example: Get the tracked sensor ID
+{{ state_attr('sensor.hvac_filter_usage_time', 'usage_sensor') }}
+
+# Example: Check if tracking sensor is available
+{{ state_attr('sensor.hvac_filter_usage_time', 'usage_sensor_available') }}
+
+# Example: Get current state of tracked sensor
+{{ state_attr('sensor.hvac_filter_usage_time', 'usage_sensor_state') }}
+```
+
 ## Notes on Date Calculations
 
 The integration uses approximate conversions for simplicity:
@@ -288,6 +358,15 @@ The integration uses approximate conversions for simplicity:
 - **Years** = 365 days (doesn't account for leap years)
 
 This may cause minor drift over long periods (approximately 1 day per year for yearly filters). For most household filters, this level of precision is sufficient.
+
+## Notes on Usage Tracking
+
+- **Usage accumulation** is calculated in real-time based on the state of the configured entity
+- **Dynamic calculation**: The displayed usage time includes current running time if the entity is active
+- **State persistence**: Usage data is saved to Home Assistant storage on every state change
+- **Timezone handling**: All timestamps are stored as UTC and displayed in local timezone
+- **Entity removal**: Removing the usage sensor clears accumulated time; changing sensors preserves it
+- **Calendar-only mode**: Filters work without usage tracking; it's completely optional
 
 ## Troubleshooting
 
@@ -307,6 +386,26 @@ Ensure you're on Home Assistant 2024.1.0 or later, then:
 1. Go to Settings → Devices & Services
 2. Click on the filter entry
 3. Click "Configure"
+
+### Usage sensor not accumulating time
+
+1. Check that the usage sensor entity is in an active state
+2. Verify entity domain is supported (binary_sensor, switch, input_boolean, fan, climate)
+3. For climate entities, ensure state is active (heat, cool, etc., not idle)
+4. Check `usage_sensor_available` attribute is `true`
+5. Check `usage_sensor_state` attribute shows expected state
+
+### Usage time resets when changing settings
+
+- **Expected behavior:** Usage time resets to 0 when removing usage sensor from config
+- **Preserved:** Usage time is preserved when changing from one usage sensor to another
+- Use `set_usage_time` service if you need to restore a specific value
+
+### Usage sensor showing unavailable
+
+1. Check that the configured usage entity still exists
+2. Verify the usage entity is not disabled
+3. Usage tracking pauses when sensor is unavailable and resumes when available again
 
 ## Support
 

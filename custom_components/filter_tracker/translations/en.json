@@ -10,12 +10,14 @@
           "lifespan_unit": "Lifespan unit",
           "filter_type": "Filter type",
           "filter_size": "Filter size (optional)",
-          "manufacturer": "Manufacturer (optional)"
+          "manufacturer": "Manufacturer (optional)",
+          "usage_sensor": "Usage sensor (optional)"
         },
         "data_description": {
           "name": "Friendly name (e.g., Bedroom air purifier)",
           "filter_type": "Type of filter (e.g., HEPA, MERV11, Carbon)",
-          "filter_size": "Physical dimensions (e.g., 16x25x1, 20x20x1)"
+          "filter_size": "Physical dimensions (e.g., 16x25x1, 20x20x1)",
+          "usage_sensor": "Entity to track usage time (binary sensor, switch, fan, climate, etc.)"
         }
       }
     }
@@ -29,12 +31,14 @@
           "lifespan_unit": "Lifespan unit",
           "filter_type": "Filter type",
           "filter_size": "Filter size (optional)",
-          "manufacturer": "Manufacturer (optional)"
+          "manufacturer": "Manufacturer (optional)",
+          "usage_sensor": "Usage sensor (optional)"
         },
         "data_description": {
           "name": "Friendly name (e.g., Bedroom air purifier)",
           "filter_type": "Type of filter (e.g., HEPA, MERV11, Carbon)",
-          "filter_size": "Physical dimensions (e.g., 16x25x1, 20x20x1)"
+          "filter_size": "Physical dimensions (e.g., 16x25x1, 20x20x1)",
+          "usage_sensor": "Entity to track usage time (binary sensor, switch, fan, climate, etc.)"
         }
       }
     }

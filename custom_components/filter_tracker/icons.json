@@ -1,0 +1,6 @@
+{
+  "services": {
+    "set_filter_replaced": {"service": "mdi:calendar-sync"},
+    "set_usage_time": {"service": "mdi:clock-edit-outline"}
+  }
+}

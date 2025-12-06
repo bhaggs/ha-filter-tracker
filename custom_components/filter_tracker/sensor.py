@@ -20,6 +20,7 @@ from .const import (
     CONF_FILTER_TYPE,
     CONF_FILTER_SIZE,
     CONF_MANUFACTURER,
+    CONF_USAGE_SENSOR,
 )
 from .utils import async_get_install_datetime
 from .base import BaseFilterEntity, BaseEntityMeta
@@ -59,6 +60,14 @@ SENSOR_DEFINITIONS = {
         name="Filter type",
         icon="mdi:air-filter",
         category=EntityCategory.DIAGNOSTIC,
+    ),
+    "usage_time": SensorMeta(
+        key="usage_time",
+        name="Usage time",
+        icon="mdi:clock-outline",
+        device_class="duration",
+        unit="h",
+        category=None,
     ),
 }
 
@@ -126,13 +135,30 @@ async def async_setup_entry(
         data.get(CONF_MANUFACTURER),
     )
 
-    async_add_entities([
+    sensors = [
         install_date_sensor,
         due_date_sensor,
         days_remaining_sensor,
         percent_remaining_sensor,
         filter_type_sensor,
-    ])
+    ]
+
+    # Add usage time sensor if usage sensor is configured
+    if data.get(CONF_USAGE_SENSOR):
+        usage_time_sensor = FilterUsageTimeSensor(
+            hass,
+            entry_id,
+            install_local,
+            data[CONF_NAME],
+            data[CONF_LIFESPAN_DAYS],
+            data.get(CONF_FILTER_TYPE),
+            data.get(CONF_FILTER_SIZE),
+            data.get(CONF_MANUFACTURER),
+            data.get(CONF_USAGE_SENSOR),
+        )
+        sensors.append(usage_time_sensor)
+
+    async_add_entities(sensors)
 
 
 class FilterInstallDateSensor(BaseFilterEntity[SensorMeta], SensorEntity):
@@ -322,10 +348,64 @@ class FilterTypeSensor(BaseFilterEntity[SensorMeta], SensorEntity):
     @property
     def extra_state_attributes(self):
         """Return static filter metadata as attributes."""
-        return {
+        attributes = {
             "rated_lifespan_days": self._lifespan_days,
             "install_date": self.install_datetime.isoformat() if self.install_datetime else None,
             "replacement_due_date": dt_util.start_of_local_day(self.due_date).isoformat(),
             "filter_size": self._filter_size,
             "manufacturer": self._manufacturer,
+        }
+
+        # Add usage tracking info if configured
+        if self._usage_sensor_entity_id:
+            attributes["usage_sensor"] = self._usage_sensor_entity_id
+            attributes["usage_sensor_available"] = self._usage_sensor_available
+            if not self._usage_sensor_available:
+                attributes["usage_tracking_status"] = "paused - sensor unavailable"
+
+        return attributes
+
+
+class FilterUsageTimeSensor(BaseFilterEntity[SensorMeta], SensorEntity):
+    """Sensor that tracks accumulated usage time based on a binary sensor."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry_id: str,
+        install_datetime: datetime,
+        name: str,
+        lifespan_days: int,
+        filter_type: str | None,
+        filter_size: str | None,
+        manufacturer: str | None,
+        usage_sensor_entity_id: str,
+    ) -> None:
+        super().__init__(
+            hass,
+            entry_id,
+            install_datetime,
+            name,
+            lifespan_days,
+            filter_type,
+            filter_size,
+            manufacturer,
+            SENSOR_DEFINITIONS["usage_time"],
+            usage_sensor_entity_id=usage_sensor_entity_id,
+        )
+
+    @property
+    def native_value(self):
+        """Return accumulated usage time in hours."""
+        return round(self.accumulated_usage_hours, 2)
+
+    @property
+    def extra_state_attributes(self):
+        """Return usage tracking metadata as attributes."""
+        return {
+            "usage_sensor": self.usage_sensor_entity_id,
+            "usage_sensor_available": self.usage_sensor_available,
+            "usage_sensor_state": self._last_usage_sensor_state,
+            "usage_sensor_last_changed": self._last_usage_changed.isoformat() if self._last_usage_changed else None,
+            "accumulated_seconds": round(self.accumulated_usage_seconds, 2),
         }
