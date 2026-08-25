@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "A v0.5.0 filter whose config flow left _temp_storage_key behind (H4).",
+    "The temp store holds the CREATION-time date; the permanent store holds a",
+    "NEWER date, as it would after the user pressed 'Filter replaced'.",
+    "Correct behaviour keeps the newer permanent value. The C2 bug re-migrates",
+    "the older temp value over it, which is the issue #5 symptom."
+  ],
+  "entry_id": "99998888777766665555444433332222",
+  "title": "Fridge Water Filter",
+  "data": {
+    "name": "Fridge Water Filter",
+    "lifespan_days": 180,
+    "filter_type": "Carbon",
+    "manufacturer": "GE",
+    "_temp_storage_key": "_flow_abcdef0123456789abcdef0123456789"
+  },
+  "storage": {
+    "filter_tracker_99998888777766665555444433332222_install": {
+      "install_datetime": "2026-08-01T15:00:00+00:00"
+    },
+    "filter_tracker__flow_abcdef0123456789abcdef0123456789_install": {
+      "install_datetime": "2026-01-10T08:00:00+00:00"
+    }
+  },
+  "expected_unique_ids": [
+    "99998888777766665555444433332222_install_date",
+    "99998888777766665555444433332222_due_date",
+    "99998888777766665555444433332222_days_remaining",
+    "99998888777766665555444433332222_life_remaining_percent",
+    "99998888777766665555444433332222_filter_type",
+    "99998888777766665555444433332222_expired",
+    "99998888777766665555444433332222_reset_install_date"
+  ],
+  "expected_install_datetime": "2026-08-01T15:00:00+00:00",
+  "stale_temp_datetime": "2026-01-10T08:00:00+00:00",
+  "temp_storage_key": "filter_tracker__flow_abcdef0123456789abcdef0123456789_install"
+}

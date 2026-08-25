@@ -20,7 +20,6 @@ from .const import (
     CONF_FILTER_SIZE,
     CONF_MANUFACTURER,
 )
-from .utils import async_get_install_datetime
 from .base import BaseFilterEntity, BaseEntityMeta
 
 @dataclass
@@ -42,7 +41,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Filter Tracker binary sensor from config entry."""
-    install_local = await async_get_install_datetime(hass, config_entry)
+    install_local = config_entry.runtime_data.install_datetime
     data = config_entry.data
 
     expired_sensor = FilterExpiredBinarySensor(

@@ -1,5 +1,5 @@
 import voluptuous as vol
-from datetime import datetime
+from datetime import date, datetime
 import logging
 
 from homeassistant import config_entries
@@ -19,10 +19,12 @@ from .const import (
     CONF_FILTER_SIZE,
     CONF_MANUFACTURER,
     CONF_USAGE_SENSOR,
+    CONF_TEMP_STORAGE_KEY,
     LIFESPAN_UNIT_FACTORS,
     get_config_update_signal,
 )
-from .tracker_data import async_save_install_datetime
+from .tracker_data import InstallDatetimeUnavailable, async_save_install_datetime
+from .utils import async_get_install_datetime, async_set_install_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +54,7 @@ def _decompose_lifespan_days(lifespan_days: int) -> tuple[int, str]:
 def _build_schema(
     include_install_date: bool = False,
     existing_data: dict | None = None,
+    install_date: date | None = None,
 ) -> vol.Schema:
     """
     Build config schema for setup or options flow.
@@ -59,6 +62,7 @@ def _build_schema(
     Args:
         include_install_date: Whether to include install_date field (setup only)
         existing_data: The existing config entry data (for options flow)
+        install_date: Current install date, to pre-populate the options picker
 
     Returns:
         Schema for the config flow form
@@ -93,6 +97,14 @@ def _build_schema(
     if use_existing_data:
         # Options flow - all fields are optional
         schema_dict[vol.Required(CONF_NAME, default=name_default)] = str
+
+        # Pre-populated with the filter's current install date, so the picker
+        # opens on today's stored value rather than an empty field.
+        if install_date is not None:
+            schema_dict[
+                vol.Required(CONF_INSTALL_DATE, default=install_date.isoformat())
+            ] = selector({"date": {}})
+
         schema_dict[vol.Required(CONF_LIFESPAN_AMOUNT, default=lifespan_amount)] = vol.All(
             vol.Coerce(int), vol.Range(min=1)
         )
@@ -165,7 +177,7 @@ class FilterTrackerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
             # Store the temp key so sensor platform knows to migrate it
-            user_input["_temp_storage_key"] = temp_storage_key
+            user_input[CONF_TEMP_STORAGE_KEY] = temp_storage_key
 
             # Create entry (without install_date)
             return self.async_create_entry(title=user_input[CONF_NAME], data=user_input)
@@ -181,7 +193,25 @@ class FilterTrackerOptionsFlow(config_entries.OptionsFlow):
         """Manage the options."""
         errors = {}
 
+        # The install datetime lives in Store, not entry data, so it has to be
+        # read before the form can pre-populate the picker.
+        try:
+            current_install = await async_get_install_datetime(
+                self.hass, self.config_entry.entry_id
+            )
+        except InstallDatetimeUnavailable as err:
+            _LOGGER.warning(
+                "Could not read install datetime for %s: %s",
+                self.config_entry.entry_id,
+                err,
+            )
+            current_install = None
+
         if user_input is not None:
+            submitted_date = user_input.pop(CONF_INSTALL_DATE, None)
+            if submitted_date is not None:
+                await self._async_apply_install_date(submitted_date, current_install)
+
             # Calculate new lifespan in days
             lifespan_amount = user_input.get(CONF_LIFESPAN_AMOUNT)
             lifespan_unit = user_input.get(CONF_LIFESPAN_UNIT)
@@ -255,10 +285,39 @@ class FilterTrackerOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data={})
 
         # Build schema using existing config data
-        options_schema = _build_schema(existing_data=self.config_entry.data)
+        options_schema = _build_schema(
+            existing_data=self.config_entry.data,
+            install_date=current_install.date() if current_install else None,
+        )
 
         return self.async_show_form(
             step_id="init",
             data_schema=options_schema,
             errors=errors
+        )
+
+    async def _async_apply_install_date(
+        self,
+        submitted_date: str,
+        current_install: datetime | None,
+    ) -> None:
+        """Persist an edited install date, if it actually changed.
+
+        The picker is date-only but the stored value carries a time of day (the
+        "Filter replaced" button records the moment it was pressed). Writing
+        unconditionally would quietly round that down to local midnight every
+        time the user saved the options form for an unrelated reason, so an
+        unchanged date is left completely alone.
+        """
+        new_date = datetime.strptime(submitted_date, "%Y-%m-%d").date()
+
+        if current_install is not None and current_install.date() == new_date:
+            return
+
+        await async_set_install_datetime(
+            self.hass, self.config_entry, dt_util.start_of_local_day(new_date)
+        )
+
+        _LOGGER.info(
+            "Install date for %s set to %s", self.config_entry.entry_id, new_date
         )

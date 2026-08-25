@@ -1,0 +1,27 @@
+{
+  "_comment": "A v0.5.0 filter with no usage sensor. The common case.",
+  "entry_id": "0123456789abcdef0123456789abcdef",
+  "title": "Living Room Air Purifier",
+  "data": {
+    "name": "Living Room Air Purifier",
+    "lifespan_days": 90,
+    "filter_type": "HEPA",
+    "filter_size": "16x25x1",
+    "manufacturer": "Filtrete"
+  },
+  "storage": {
+    "filter_tracker_0123456789abcdef0123456789abcdef_install": {
+      "install_datetime": "2026-06-01T07:00:00+00:00"
+    }
+  },
+  "expected_unique_ids": [
+    "0123456789abcdef0123456789abcdef_install_date",
+    "0123456789abcdef0123456789abcdef_due_date",
+    "0123456789abcdef0123456789abcdef_days_remaining",
+    "0123456789abcdef0123456789abcdef_life_remaining_percent",
+    "0123456789abcdef0123456789abcdef_filter_type",
+    "0123456789abcdef0123456789abcdef_expired",
+    "0123456789abcdef0123456789abcdef_reset_install_date"
+  ],
+  "expected_install_datetime": "2026-06-01T07:00:00+00:00"
+}

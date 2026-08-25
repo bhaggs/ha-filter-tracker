@@ -10,6 +10,11 @@ CONF_FILTER_SIZE = "filter_size"
 CONF_MANUFACTURER = "manufacturer"
 CONF_USAGE_SENSOR = "usage_sensor"
 
+# Legacy key: the config flow parked the chosen install date in a temp store
+# keyed by flow_id, because entry_id did not exist yet. Setup migrates and
+# removes it; it should never persist past the first setup of an entry.
+CONF_TEMP_STORAGE_KEY = "_temp_storage_key"
+
 # Lifespan unit conversion factors
 # Note: These are approximate conversions for simplicity:
 # - "months" uses 30 days (actual months range from 28-31 days)

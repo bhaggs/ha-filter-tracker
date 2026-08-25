@@ -1,4 +1,4 @@
-name: Validate with hassfest
+name: Validate with HACS
 
 on:
   workflow_dispatch:
@@ -9,7 +9,9 @@ on:
 
 jobs:
   validate:
-    runs-on: "ubuntu-latest"
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: home-assistant/actions/hassfest@master
+      - uses: hacs/action@main
+        with:
+          category: integration
