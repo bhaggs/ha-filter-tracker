@@ -27,6 +27,7 @@
       "init": {
         "data": {
           "name": "Filter name",
+          "install_date": "Install date",
           "lifespan_amount": "Lifespan amount",
           "lifespan_unit": "Lifespan unit",
           "filter_type": "Filter type",
@@ -36,6 +37,7 @@
         },
         "data_description": {
           "name": "Friendly name (e.g., Bedroom air purifier)",
+          "install_date": "When the filter was last replaced. Leave unchanged unless you are correcting it.",
           "filter_type": "Type of filter (e.g., HEPA, MERV11, Carbon)",
           "filter_size": "Physical dimensions (e.g., 16x25x1, 20x20x1)",
           "usage_sensor": "Entity to track usage time (binary sensor, switch, fan, climate, etc.)"

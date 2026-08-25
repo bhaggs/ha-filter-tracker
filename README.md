@@ -56,8 +56,9 @@ A Home Assistant custom integration for tracking household filters that need reg
 2. Find the Filter Tracker integration
 3. Click on a specific filter entry
 4. Click "Configure"
-5. Update any settings (name, lifespan, filter type, filter size, manufacturer)
-   - Note: Install date cannot be changed via options flow - use the service or button instead
+5. Update any settings (install date, name, lifespan, filter type, filter size, manufacturer)
+   - The install date picker is pre-filled with the current value. Leave it alone unless you are correcting it - saving the form with the date unchanged will not alter it.
+   - You can also update the install date with the "Filter replaced" button or the `filter_tracker.set_filter_replaced` service.
 
 ### Deleting a Filter
 
