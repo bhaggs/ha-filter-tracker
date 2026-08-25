@@ -5,7 +5,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
@@ -25,7 +25,16 @@ from .const import (
     get_install_update_signal,
     get_usage_update_signal,
 )
-from .tracker_data import async_save_install_datetime, async_load_usage_data, async_save_usage_data, _get_store, _get_usage_store
+from .models import FilterTrackerData
+from .tracker_data import (
+    InstallDatetimeUnavailable,
+    async_load_usage_data,
+    async_remove_install_store,
+    async_remove_usage_store,
+    async_save_install_datetime,
+    async_save_usage_data,
+)
+from .utils import async_initialize_install_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -107,24 +116,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entries[entry.entry_id] = True
 
+    # Resolve the install datetime once, here, before any platform is set up.
+    # This is the only code path permitted to write a default, so a read failure
+    # retries setup instead of silently overwriting the user's real date.
+    try:
+        install_datetime = await async_initialize_install_datetime(hass, entry)
+    except InstallDatetimeUnavailable as err:
+        raise ConfigEntryNotReady(str(err)) from err
+
+    entry.runtime_data = FilterTrackerData(install_datetime=install_datetime)
+
     await _async_register_services(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a Filter Tracker entry."""
+    """Unload a Filter Tracker entry.
+
+    Deliberately does NOT touch stored data: HA runs unload on every reload, not
+    just on deletion, so removing the stores here destroyed the install date and
+    usage hours whenever an entry was reloaded. Deletion is handled by
+    async_remove_entry below.
+    """
     _LOGGER.debug("Unloading filter_tracker entry: %s", entry.entry_id)
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        # Clean up storage files
-        store = _get_store(hass, entry.entry_id)
-        await store.async_remove()
-
-        usage_store = _get_usage_store(hass, entry.entry_id)
-        await usage_store.async_remove()
-
         # Clean up in-memory data
         domain_data = hass.data.get(DOMAIN, {})
         entries: dict = domain_data.get(DATA_ENTRIES, {})
@@ -135,6 +153,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data.pop(DOMAIN, None)
 
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete an entry's persisted data.
+
+    HA calls this only when the entry is actually being removed, which is the
+    one moment it is safe to discard the user's filter history.
+    """
+    _LOGGER.debug("Removing stored data for filter_tracker entry: %s", entry.entry_id)
+
+    await async_remove_install_store(hass, entry.entry_id)
+    await async_remove_usage_store(hass, entry.entry_id)
 
 
 def _ensure_domain_data(hass: HomeAssistant) -> dict:

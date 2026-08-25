@@ -1,64 +1,131 @@
 """Utility functions for Filter Tracker integration."""
 
+from __future__ import annotations
+
 from datetime import datetime
+import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 import homeassistant.util.dt as dt_util
 
-from .tracker_data import async_load_install_datetime, async_save_install_datetime
+from .const import CONF_TEMP_STORAGE_KEY
+from .tracker_data import (
+    InstallDatetimeUnavailable,
+    async_load_install_datetime,
+    async_remove_install_store,
+    async_save_install_datetime,
+)
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_get_install_datetime(
     hass: HomeAssistant,
-    config_entry: ConfigEntry
-) -> datetime:
-    """Load install datetime from storage, handling temp keys and defaults.
+    entry_id: str,
+) -> datetime | None:
+    """Read the install datetime for an entry, in local time.
 
-    This function manages the installation datetime lifecycle:
-    1. Checks for temporary storage key from config flow
-    2. Migrates temp storage to permanent location
-    3. Cleans up temporary storage key from config entry
-    4. Falls back to current date if no stored value exists
-
-    Args:
-        hass: Home Assistant instance
-        config_entry: The config entry for this filter
-
-    Returns:
-        The install datetime in local timezone
+    A pure read: it never writes, and never invents a default. Callers that
+    display a value use this. Raises InstallDatetimeUnavailable if a stored
+    value exists but cannot be read.
     """
-    data = config_entry.data
+    utc_install = await async_load_install_datetime(hass, entry_id)
+    return dt_util.as_local(utc_install) if utc_install else None
+
+
+async def async_initialize_install_datetime(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+) -> datetime:
+    """Resolve an entry's install datetime at setup, writing only if needed.
+
+    Called exactly once per entry, from async_setup_entry, before the platforms
+    are forwarded. It is the only place allowed to write a default.
+
+    Handles the legacy config-flow handoff: the flow could not know the entry_id
+    yet, so it parked the chosen date in a temp store keyed by flow_id. That key
+    was cleaned up by a fire-and-forget task raced by three platforms, so it
+    frequently survived -- and every later setup re-migrated the creation-time
+    date over whatever the user had since set with the "Filter replaced" button.
+
+    Returns the install datetime in local time.
+    """
     entry_id = config_entry.entry_id
-    temp_storage_key = data.get("_temp_storage_key")
-    utc_install: datetime
+    temp_storage_key = config_entry.data.get(CONF_TEMP_STORAGE_KEY)
+
+    utc_install = await async_load_install_datetime(hass, entry_id)
 
     if temp_storage_key:
-        # New entry - try to load from temporary location created during config flow
-        stored_dt = await async_load_install_datetime(hass, temp_storage_key)
-        if stored_dt is not None:
-            # Migrate to permanent location with actual entry_id
-            utc_install = await async_save_install_datetime(hass, entry_id, stored_dt)
+        utc_install = await _async_migrate_temp_storage(
+            hass, config_entry, temp_storage_key, utc_install
+        )
 
-            # Defer cleanup of temp storage key to avoid triggering state changes during setup
-            async def cleanup_temp_storage():
-                """Clean up temporary storage key from config entry."""
-                updated_data = {k: v for k, v in config_entry.data.items() if k != "_temp_storage_key"}
-                hass.config_entries.async_update_entry(config_entry, data=updated_data)
-
-            hass.async_create_task(cleanup_temp_storage())
-        else:
-            # Temp storage failed, use default
-            default_local = dt_util.start_of_local_day(dt_util.now().date())
-            utc_install = await async_save_install_datetime(hass, entry_id, default_local)
-    else:
-        # Existing entry - load from permanent location
-        stored_dt = await async_load_install_datetime(hass, entry_id)
-        if stored_dt is not None:
-            utc_install = stored_dt
-        else:
-            # No stored datetime found, use default
-            default_local = dt_util.start_of_local_day(dt_util.now().date())
-            utc_install = await async_save_install_datetime(hass, entry_id, default_local)
+    if utc_install is None:
+        # Genuinely nothing stored: a new filter. This is the only write of a
+        # default, and it is reachable only at setup.
+        default_local = dt_util.start_of_local_day(dt_util.now().date())
+        utc_install = await async_save_install_datetime(hass, entry_id, default_local)
+        _LOGGER.debug("No stored install datetime for %s, defaulting to today", entry_id)
 
     return dt_util.as_local(utc_install)
+
+
+async def _async_migrate_temp_storage(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    temp_storage_key: str,
+    utc_install: datetime | None,
+) -> datetime | None:
+    """Migrate a legacy temp install store, then remove every trace of it.
+
+    An existing permanent value always wins: it is either the migrated value
+    from a previous setup or a newer date the user set deliberately, and the
+    temp store only ever holds the original creation-time date.
+    """
+    entry_id = config_entry.entry_id
+
+    if utc_install is None:
+        try:
+            temp_value = await async_load_install_datetime(hass, temp_storage_key)
+        except InstallDatetimeUnavailable as err:
+            _LOGGER.warning(
+                "Could not read temporary install datetime for %s: %s", entry_id, err
+            )
+            temp_value = None
+
+        if temp_value is not None:
+            await async_save_install_datetime(hass, entry_id, temp_value)
+
+            # Confirm the permanent store reads back before dropping the only
+            # other copy of this date.
+            utc_install = await async_load_install_datetime(hass, entry_id)
+            if utc_install is None:
+                _LOGGER.error(
+                    "Refusing to remove temporary install store for %s: the "
+                    "permanent store did not read back after writing",
+                    entry_id,
+                )
+                return temp_value
+
+            _LOGGER.info(
+                "Migrated install datetime for %s from temporary storage", entry_id
+            )
+    else:
+        _LOGGER.debug(
+            "Ignoring stale temporary install store for %s; keeping stored value",
+            entry_id,
+        )
+
+    await async_remove_install_store(hass, temp_storage_key)
+
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={
+            key: value
+            for key, value in config_entry.data.items()
+            if key != CONF_TEMP_STORAGE_KEY
+        },
+    )
+
+    return utc_install

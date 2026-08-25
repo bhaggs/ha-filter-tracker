@@ -19,6 +19,7 @@ from .const import (
     CONF_FILTER_SIZE,
     CONF_MANUFACTURER,
     CONF_USAGE_SENSOR,
+    CONF_TEMP_STORAGE_KEY,
     LIFESPAN_UNIT_FACTORS,
     get_config_update_signal,
 )
@@ -165,7 +166,7 @@ class FilterTrackerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
             # Store the temp key so sensor platform knows to migrate it
-            user_input["_temp_storage_key"] = temp_storage_key
+            user_input[CONF_TEMP_STORAGE_KEY] = temp_storage_key
 
             # Create entry (without install_date)
             return self.async_create_entry(title=user_input[CONF_NAME], data=user_input)

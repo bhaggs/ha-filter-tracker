@@ -147,6 +147,27 @@ async def test_lingering_temp_key_does_not_revert_install_date(hass, hass_storag
     assert stored == fixture["expected_install_datetime"]
 
 
+async def test_removing_entry_still_deletes_storage(hass, hass_storage):
+    """Deleting a filter must still clean up its stores.
+
+    The counterpart to test_reload_preserves_install_date: moving cleanup out of
+    unload must not turn into never cleaning up, which would leak two .storage
+    files per filter the user ever removes.
+    """
+    entry, fixture = await setup_fixture(
+        hass,
+        hass_storage,
+        "with_usage_sensor",
+        initial_states={"fan.furnace_blower": "off"},
+    )
+
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert stored_install_datetime(hass_storage, fixture) is None
+    assert stored_accumulated_seconds(hass_storage, fixture) is None
+
+
 async def test_temp_storage_is_cleaned_up(hass, hass_storage):
     """The temp store and its entry-data key must not survive setup.
 

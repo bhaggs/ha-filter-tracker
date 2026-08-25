@@ -2,13 +2,25 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
+from typing import Any
 
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class InstallDatetimeUnavailable(HomeAssistantError):
+    """A stored install datetime exists but could not be read.
+
+    Deliberately distinct from "nothing stored yet", which is a legitimate None
+    and means a brand-new filter. Conflating the two is what allowed a single
+    transient read failure to be persisted as today's date, permanently losing
+    the user's real install date.
+    """
 
 STORE_VERSION = 1
 STORE_KEY = "install_datetime"
@@ -27,27 +39,55 @@ def _get_usage_store(hass, entry_id: str) -> Store:
 
 
 async def async_load_install_datetime(hass, entry_id: str) -> datetime | None:
-    """Load the stored install datetime for an entry."""
+    """Load the stored install datetime for an entry.
+
+    Returns None only when nothing has been stored yet. Raises
+    InstallDatetimeUnavailable when a value exists but cannot be read, so the
+    caller can decline to act rather than overwriting real data with a default.
+    """
 
     store = _get_store(hass, entry_id)
     try:
         data = await store.async_load()
     except Exception as err:
-        _LOGGER.error("Failed to load install datetime for %s: %s", entry_id, err)
+        raise InstallDatetimeUnavailable(
+            f"Could not read stored install datetime for {entry_id}: {err}"
+        ) from err
+
+    if not data:
+        # Nothing stored yet -- a genuinely new filter.
         return None
 
-    if not data or STORE_KEY not in data:
-        return None
+    if STORE_KEY not in data:
+        raise InstallDatetimeUnavailable(
+            f"Stored install datetime for {entry_id} is missing the "
+            f"{STORE_KEY!r} key"
+        )
 
-    parsed = dt_util.parse_datetime(data[STORE_KEY])
+    raw = data[STORE_KEY]
+    parsed = dt_util.parse_datetime(raw) if isinstance(raw, str) else None
     if not parsed:
-        _LOGGER.debug("Invalid stored install datetime for %s", entry_id)
-        return None
+        raise InstallDatetimeUnavailable(
+            f"Stored install datetime for {entry_id} is not a valid "
+            f"datetime: {raw!r}"
+        )
 
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=dt_util.get_default_time_zone())
 
     return dt_util.as_utc(parsed)
+
+
+async def async_remove_install_store(hass, entry_id: str) -> None:
+    """Delete the install datetime store for an entry."""
+
+    await _get_store(hass, entry_id).async_remove()
+
+
+async def async_remove_usage_store(hass, entry_id: str) -> None:
+    """Delete the usage tracking store for an entry."""
+
+    await _get_usage_store(hass, entry_id).async_remove()
 
 
 async def async_save_install_datetime(
@@ -72,7 +112,7 @@ async def async_save_install_datetime(
     return utc_value
 
 
-async def async_load_usage_data(hass, entry_id: str) -> dict[str, any] | None:
+async def async_load_usage_data(hass, entry_id: str) -> dict[str, Any] | None:
     """Load the stored usage tracking data for an entry."""
 
     store = _get_usage_store(hass, entry_id)

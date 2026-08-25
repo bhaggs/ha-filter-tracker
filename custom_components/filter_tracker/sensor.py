@@ -22,7 +22,6 @@ from .const import (
     CONF_MANUFACTURER,
     CONF_USAGE_SENSOR,
 )
-from .utils import async_get_install_datetime
 from .base import BaseFilterEntity, BaseEntityMeta
 
 @dataclass
@@ -77,7 +76,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Filter Tracker sensor from config entry."""
-    install_local = await async_get_install_datetime(hass, config_entry)
+    install_local = config_entry.runtime_data.install_datetime
     data = config_entry.data
     entry_id = config_entry.entry_id
 
