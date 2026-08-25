@@ -1,0 +1,35 @@
+{
+  "_comment": "A v0.5.0 filter tracking a fan, with non-zero accumulated hours. Guards the usage store against schema drift.",
+  "entry_id": "aaaabbbbccccddddeeeeffff00001111",
+  "title": "Furnace Filter",
+  "data": {
+    "name": "Furnace Filter",
+    "lifespan_days": 180,
+    "filter_type": "MERV11",
+    "filter_size": "20x20x1",
+    "manufacturer": "Honeywell",
+    "usage_sensor": "fan.furnace_blower"
+  },
+  "storage": {
+    "filter_tracker_aaaabbbbccccddddeeeeffff00001111_install": {
+      "install_datetime": "2026-03-15T12:30:00+00:00"
+    },
+    "filter_tracker_aaaabbbbccccddddeeeeffff00001111_usage": {
+      "accumulated_seconds": 1234567.5,
+      "usage_sensor_last_changed": "2026-08-20T18:45:00+00:00",
+      "last_sensor_state": "off"
+    }
+  },
+  "expected_unique_ids": [
+    "aaaabbbbccccddddeeeeffff00001111_install_date",
+    "aaaabbbbccccddddeeeeffff00001111_due_date",
+    "aaaabbbbccccddddeeeeffff00001111_days_remaining",
+    "aaaabbbbccccddddeeeeffff00001111_life_remaining_percent",
+    "aaaabbbbccccddddeeeeffff00001111_filter_type",
+    "aaaabbbbccccddddeeeeffff00001111_usage_time",
+    "aaaabbbbccccddddeeeeffff00001111_expired",
+    "aaaabbbbccccddddeeeeffff00001111_reset_install_date"
+  ],
+  "expected_install_datetime": "2026-03-15T12:30:00+00:00",
+  "expected_accumulated_seconds": 1234567.5
+}

@@ -1,0 +1,8 @@
+# Test harness for the filter_tracker custom integration.
+#
+# pytest-homeassistant-custom-component pins an exact Home Assistant version,
+# so this single pin decides which HA release the suite runs against. The
+# integration targets modern HA only -- there is deliberately no version matrix.
+#
+# 0.13.357 -> homeassistant 2026.8.3 (requires Python >= 3.14.2)
+pytest-homeassistant-custom-component==0.13.357
