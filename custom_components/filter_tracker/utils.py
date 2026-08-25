@@ -7,9 +7,10 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 import homeassistant.util.dt as dt_util
 
-from .const import CONF_TEMP_STORAGE_KEY
+from .const import CONF_TEMP_STORAGE_KEY, get_install_update_signal
 from .tracker_data import (
     InstallDatetimeUnavailable,
     async_load_install_datetime,
@@ -18,6 +19,37 @@ from .tracker_data import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def async_set_install_datetime(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    value: datetime,
+) -> datetime:
+    """Record a new install datetime and propagate it everywhere.
+
+    The single writer for all three user-facing paths: the "Filter replaced"
+    button, the set_filter_replaced service, and the options flow's date picker.
+
+    Storage is not the only consumer any more -- entities update from the
+    dispatcher signal and the calendar reads shared in-memory state -- so all
+    three have to move together. Leaving this to each caller is what let the
+    calendar drift out of step with the sensors.
+
+    Returns the stored value in local time.
+    """
+    entry_id = config_entry.entry_id
+
+    utc_value = await async_save_install_datetime(hass, entry_id, value)
+    local_value = dt_util.as_local(utc_value)
+
+    runtime_data = getattr(config_entry, "runtime_data", None)
+    if runtime_data is not None:
+        runtime_data.install_datetime = local_value
+
+    async_dispatcher_send(hass, get_install_update_signal(entry_id), local_value)
+
+    return local_value
 
 
 async def async_get_install_datetime(

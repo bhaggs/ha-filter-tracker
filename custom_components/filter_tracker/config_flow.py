@@ -22,10 +22,9 @@ from .const import (
     CONF_TEMP_STORAGE_KEY,
     LIFESPAN_UNIT_FACTORS,
     get_config_update_signal,
-    get_install_update_signal,
 )
 from .tracker_data import InstallDatetimeUnavailable, async_save_install_datetime
-from .utils import async_get_install_datetime
+from .utils import async_get_install_datetime, async_set_install_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -315,20 +314,10 @@ class FilterTrackerOptionsFlow(config_entries.OptionsFlow):
         if current_install is not None and current_install.date() == new_date:
             return
 
-        entry_id = self.config_entry.entry_id
-        utc_value = await async_save_install_datetime(
-            self.hass, entry_id, dt_util.start_of_local_day(new_date)
+        await async_set_install_datetime(
+            self.hass, self.config_entry, dt_util.start_of_local_day(new_date)
         )
-        local_value = dt_util.as_local(utc_value)
 
-        _LOGGER.info("Install date for %s set to %s", entry_id, new_date)
-
-        # Keep the shared runtime state in step, so the calendar reflects the
-        # change without waiting for a reload.
-        runtime_data = getattr(self.config_entry, "runtime_data", None)
-        if runtime_data is not None:
-            runtime_data.install_datetime = local_value
-
-        async_dispatcher_send(
-            self.hass, get_install_update_signal(entry_id), local_value
+        _LOGGER.info(
+            "Install date for %s set to %s", self.config_entry.entry_id, new_date
         )

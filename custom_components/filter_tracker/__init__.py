@@ -22,7 +22,6 @@ from .const import (
     ATTR_ADJUST_HOURS,
     CONF_USAGE_SENSOR,
     DATA_ENTRIES,
-    get_install_update_signal,
     get_usage_update_signal,
 )
 from .models import FilterTrackerData
@@ -31,10 +30,9 @@ from .tracker_data import (
     async_load_usage_data,
     async_remove_install_store,
     async_remove_usage_store,
-    async_save_install_datetime,
     async_save_usage_data,
 )
-from .utils import async_initialize_install_datetime
+from .utils import async_initialize_install_datetime, async_set_install_datetime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -240,12 +238,11 @@ async def _async_handle_set_filter_replaced(hass: HomeAssistant, call: ServiceCa
     else:
         effective_dt = dt_util.as_utc(replacement_dt)
 
-    utc_value = await async_save_install_datetime(hass, entry_id, effective_dt)
-    async_dispatcher_send(
-        hass,
-        get_install_update_signal(entry_id),
-        dt_util.as_local(utc_value),
-    )
+    config_entry = hass.config_entries.async_get_entry(entry_id)
+    if config_entry is None:
+        raise HomeAssistantError("Filter Tracker entry not found.")
+
+    await async_set_install_datetime(hass, config_entry, effective_dt)
 
 
 async def _async_handle_set_usage_time(hass: HomeAssistant, call: ServiceCall) -> None:
