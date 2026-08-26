@@ -72,13 +72,19 @@ async def setup_fixture(
 
     ``initial_states`` is applied before setup so a tracked usage entity already
     exists when entities attach their listeners -- matching what a real restart
-    looks like, where states are restored before the integration loads.
+    looks like, where states are restored before the integration loads. Values
+    are either a state string or a ``(state, attributes)`` tuple, the latter for
+    climate entities that report ``hvac_action``.
     """
     fixture = load_fixture(name)
     seed_storage(hass_storage, fixture)
 
-    for entity_id, state in (initial_states or {}).items():
-        hass.states.async_set(entity_id, state)
+    for entity_id, value in (initial_states or {}).items():
+        if isinstance(value, tuple):
+            state, attributes = value
+        else:
+            state, attributes = value, None
+        hass.states.async_set(entity_id, state, attributes)
 
     entry = build_entry(fixture)
     entry.add_to_hass(hass)

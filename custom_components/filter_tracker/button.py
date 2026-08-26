@@ -86,5 +86,10 @@ class FilterResetInstallDateButton(BaseFilterEntity[ButtonMeta], ButtonEntity):
             async_dispatcher_send(
                 self.hass,
                 get_usage_update_signal(self._config_entry.entry_id),
-                {"accumulated_seconds": 0.0, "usage_sensor_last_changed": None, "last_sensor_state": "off"},
+                {
+                    "accumulated_seconds": 0.0,
+                    "usage_sensor_last_changed": None,
+                    "last_sensor_state": "off",
+                    "last_active": False,
+                },
             )

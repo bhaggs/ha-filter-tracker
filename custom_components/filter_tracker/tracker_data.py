@@ -28,6 +28,15 @@ USAGE_STORE_VERSION = 1
 USAGE_STORE_KEY_SECONDS = "accumulated_seconds"
 USAGE_STORE_KEY_LAST_CHANGED = "usage_sensor_last_changed"
 USAGE_STORE_KEY_LAST_STATE = "last_sensor_state"
+# Whether the tracked entity counted as running. Derived state, persisted
+# because the raw state string alone is not enough for climate entities, where
+# "running" comes from the hvac_action attribute rather than the state.
+#
+# Added without a store version bump: it is a purely additive key, and loading
+# returns None when it is absent so the caller can fall back to the old
+# state-string rule. A version bump without an async_migrate_func would make
+# Store read the whole file as empty and lose the user's accumulated hours.
+USAGE_STORE_KEY_LAST_ACTIVE = "last_active"
 
 
 def _get_store(hass, entry_id: str) -> Store:
@@ -128,12 +137,19 @@ async def async_load_usage_data(hass, entry_id: str) -> dict[str, Any] | None:
             USAGE_STORE_KEY_SECONDS: 0.0,
             USAGE_STORE_KEY_LAST_CHANGED: None,
             USAGE_STORE_KEY_LAST_STATE: "off",
+            USAGE_STORE_KEY_LAST_ACTIVE: False,
         }
 
     # Validate and parse
     accumulated_seconds = data.get(USAGE_STORE_KEY_SECONDS, 0.0)
     last_changed_str = data.get(USAGE_STORE_KEY_LAST_CHANGED)
     last_state = data.get(USAGE_STORE_KEY_LAST_STATE, "off")
+
+    # None means "written before this key existed"; the caller derives it from
+    # last_state instead. Absence is not the same as False here.
+    last_active = data.get(USAGE_STORE_KEY_LAST_ACTIVE)
+    if not isinstance(last_active, bool):
+        last_active = None
 
     last_changed = None
     if last_changed_str:
@@ -147,6 +163,7 @@ async def async_load_usage_data(hass, entry_id: str) -> dict[str, Any] | None:
         USAGE_STORE_KEY_SECONDS: float(accumulated_seconds),
         USAGE_STORE_KEY_LAST_CHANGED: last_changed,
         USAGE_STORE_KEY_LAST_STATE: last_state,
+        USAGE_STORE_KEY_LAST_ACTIVE: last_active,
     }
 
 
@@ -156,6 +173,7 @@ async def async_save_usage_data(
     accumulated_seconds: float,
     last_changed: datetime | None,
     last_state: str,
+    last_active: bool = False,
 ) -> None:
     """Persist the usage tracking data."""
 
@@ -164,6 +182,7 @@ async def async_save_usage_data(
     data = {
         USAGE_STORE_KEY_SECONDS: accumulated_seconds,
         USAGE_STORE_KEY_LAST_STATE: last_state,
+        USAGE_STORE_KEY_LAST_ACTIVE: last_active,
     }
 
     if last_changed:
@@ -197,4 +216,5 @@ async def async_reset_usage_data(hass, entry_id: str) -> None:
         accumulated_seconds=0.0,
         last_changed=None,
         last_state="off",
+        last_active=False,
     )

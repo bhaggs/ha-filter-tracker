@@ -30,8 +30,23 @@ LIFESPAN_UNIT_FACTORS = {
 
 PLATFORMS = ["sensor", "binary_sensor", "button", "calendar"]
 
-# Climate states that count as "active" for usage tracking
-# These states indicate the HVAC system is actively running
+# Climate hvac_action values that mean the system is genuinely running.
+# Preferred over the mode below whenever the entity reports it: a thermostat
+# left on "heat" all winter sits in "idle" most of the time, and counting the
+# mode would accrue 24/7 for what is usually the main furnace-filter use case.
+ATTR_HVAC_ACTION = "hvac_action"
+CLIMATE_ACTIVE_ACTIONS = [
+    "heating",
+    "cooling",
+    "drying",
+    "fan",
+    "preheating",
+    "defrosting",
+]
+
+# Fallback for climate entities that do not report hvac_action: the mode alone.
+# Also the rule used to derive the active flag for usage stores written before
+# it was persisted.
 CLIMATE_ACTIVE_STATES = ["heat", "cool", "heat_cool", "dry", "fan_only", "auto"]
 
 SERVICE_SET_FILTER_REPLACED = "set_filter_replaced"
@@ -43,6 +58,10 @@ ATTR_USAGE_HOURS = "usage_hours"
 ATTR_ADJUST_HOURS = "adjust_hours"
 
 DATA_ENTRIES = "entries"
+# One calendar serves the whole integration, but HA entities must belong to a
+# config entry, so one entry owns it. Tracking which lets the calendar be
+# recreated when that entry reloads, and re-homed when it is deleted.
+DATA_CALENDAR_OWNER = "calendar_owner_entry_id"
 SIGNAL_INSTALL_UPDATED = "filter_tracker_install_updated"
 SIGNAL_CONFIG_UPDATED = "filter_tracker_config_updated"
 SIGNAL_USAGE_UPDATED = "filter_tracker_usage_updated"

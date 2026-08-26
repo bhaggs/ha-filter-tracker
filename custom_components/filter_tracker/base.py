@@ -11,7 +11,7 @@ import logging
 from typing import Generic, TypeVar
 
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import HomeAssistant, Event, callback
+from homeassistant.core import HomeAssistant, Event, State, callback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers import device_registry as dr
@@ -26,6 +26,8 @@ from .const import (
     CONF_FILTER_SIZE,
     CONF_MANUFACTURER,
     CONF_USAGE_SENSOR,
+    ATTR_HVAC_ACTION,
+    CLIMATE_ACTIVE_ACTIONS,
     CLIMATE_ACTIVE_STATES,
     get_install_update_signal,
     get_config_update_signal,
@@ -114,7 +116,15 @@ class BaseFilterEntity(Generic[TMeta]):
         self._accumulated_usage_seconds: float = 0.0
         self._last_usage_changed: datetime | None = None
         self._last_usage_sensor_state: str = "off"
+        self._last_usage_active: bool = False
         self._usage_sensor_available: bool = True
+
+        # Only the usage-time sensor is constructed with a tracked entity, and
+        # only it should ever subscribe to one or write the usage store. Every
+        # entity receives the config-update signal, so without this flag a
+        # change of usage sensor turned all of them into trackers, racing
+        # read-modify-write on a single file.
+        self._tracks_usage: bool = usage_sensor_entity_id is not None
 
         # Set common entity attributes
         self._attr_unique_id = f"{entry_id}_{meta.key}"
@@ -153,28 +163,15 @@ class BaseFilterEntity(Generic[TMeta]):
         )
 
         # Load usage tracking data and subscribe to sensor state changes
-        if self._usage_sensor_entity_id:
+        if self._tracks_usage and self._usage_sensor_entity_id:
             await self._async_load_usage_data()
             self._remove_usage_state_listener = async_track_state_change_event(
                 self.hass, [self._usage_sensor_entity_id], self._async_usage_sensor_state_changed
             )
 
-            # Initialize usage sensor state from current state if this is a new filter
-            if self._last_usage_changed is None:  # No previously stored data = new filter
-                current_state = self.hass.states.get(self._usage_sensor_entity_id)
-                if current_state and current_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-                    self._last_usage_sensor_state = current_state.state
-                    self._last_usage_changed = dt_util.utcnow()
-
-                    # Save initialized state to storage
-                    await self._async_save_usage_data()
-
-                    _LOGGER.debug(
-                        "Initialized usage sensor state for filter %s to %s (sensor: %s)",
-                        self._name,
-                        current_state.state,
-                        self._usage_sensor_entity_id,
-                    )
+            # Always reconcile against the live state, not just for new filters:
+            # nothing else corrects a stale stored timestamp after a restart.
+            await self._async_reconcile_usage_state()
 
     async def async_will_remove_from_hass(self) -> None:
         """Unsubscribe from dispatcher signals when removed from hass."""
@@ -192,10 +189,17 @@ class BaseFilterEntity(Generic[TMeta]):
             self._remove_usage_state_listener()
             self._remove_usage_state_listener = None
 
+    @callback
     def _handle_install_update(self, install_datetime: datetime) -> None:
-        """Handle install datetime updates from dispatcher signal."""
+        """Handle install datetime updates from dispatcher signal.
+
+        Marked as a callback so the dispatcher runs it on the event loop.
+        Without it HA treats a plain function as blocking and hands it to an
+        executor thread, which is why this used to need the thread-safe
+        schedule_update_ha_state.
+        """
         self._install_datetime = install_datetime
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()
 
     async def _handle_config_update(self, config_data: dict) -> None:
         """Handle config updates from dispatcher signal."""
@@ -206,12 +210,13 @@ class BaseFilterEntity(Generic[TMeta]):
         self._filter_size = config_data.get(CONF_FILTER_SIZE)
         self._manufacturer = config_data.get(CONF_MANUFACTURER) or "Unknown"
 
-        # Check if usage sensor changed
+        # Check if usage sensor changed. Only the usage-time sensor tracks one;
+        # the other entities receive this signal too and must not adopt it.
         new_usage_sensor = config_data.get(CONF_USAGE_SENSOR)
         # Normalize empty string to None for proper comparison
         if new_usage_sensor == "":
             new_usage_sensor = None
-        if new_usage_sensor != self._usage_sensor_entity_id:
+        if self._tracks_usage and new_usage_sensor != self._usage_sensor_entity_id:
             old_usage_sensor = self._usage_sensor_entity_id  # Save for later comparison
 
             # Unsubscribe from old sensor
@@ -283,93 +288,142 @@ class BaseFilterEntity(Generic[TMeta]):
             )
 
         # Trigger state update for lifespan changes
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()
 
+    @callback
     def _handle_usage_update(self, usage_data: dict) -> None:
         """Handle usage data updates from dispatcher signal."""
         self._accumulated_usage_seconds = usage_data.get("accumulated_seconds", 0.0)
         self._last_usage_changed = usage_data.get("usage_sensor_last_changed")
         self._last_usage_sensor_state = usage_data.get("last_sensor_state", "off")
-        self.schedule_update_ha_state()
+        self._last_usage_active = usage_data.get("last_active", False)
+        self.async_write_ha_state()
 
     async def _async_load_usage_data(self) -> None:
         """Load usage tracking data from storage."""
         usage_data = await async_load_usage_data(self.hass, self._entry_id)
-        if usage_data:
-            self._accumulated_usage_seconds = usage_data.get("accumulated_seconds", 0.0)
-            self._last_usage_changed = usage_data.get("usage_sensor_last_changed")
-            self._last_usage_sensor_state = usage_data.get("last_sensor_state", "off")
+        if not usage_data:
+            return
 
-    def _is_usage_sensor_active(self, state_value: str, entity_id: str) -> bool:
-        """Determine if the usage sensor is in an active state.
+        self._accumulated_usage_seconds = usage_data.get("accumulated_seconds", 0.0)
+        self._last_usage_changed = usage_data.get("usage_sensor_last_changed")
+        self._last_usage_sensor_state = usage_data.get("last_sensor_state", "off")
 
-        Args:
-            state_value: The state value to check
-            entity_id: The entity ID to determine domain
+        # None means the store predates the persisted flag; derive it the way
+        # v0.5.0 did so the loaded state is self-consistent. At startup this is
+        # superseded moments later by reconciliation against the live state --
+        # what protects upgraded installs is accumulated_seconds, which is read
+        # unchanged. This matters if the loaded state is ever used before
+        # reconciliation runs.
+        last_active = usage_data.get("last_active")
+        if last_active is None:
+            last_active = self._legacy_state_is_active(self._last_usage_sensor_state)
+        self._last_usage_active = last_active
 
-        Returns:
-            True if the state counts as "active" for usage tracking
+    def _state_is_active(self, state: State | None) -> bool:
+        """Whether the tracked entity counts as running right now.
+
+        For climate entities the mode is a poor proxy: a thermostat set to
+        "heat" sits in hvac_action "idle" most of the time, so counting the mode
+        accrues 24/7 for a furnace that ran for an hour. Prefer hvac_action when
+        the entity reports it, and fall back to the mode when it does not.
         """
-        # Handle unavailable/unknown states
-        if state_value in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
             return False
 
-        # Check if entity is a climate entity
-        if entity_id and entity_id.startswith("climate."):
-            return state_value in CLIMATE_ACTIVE_STATES
+        if state.entity_id.startswith("climate."):
+            hvac_action = state.attributes.get(ATTR_HVAC_ACTION)
+            if hvac_action is not None:
+                return hvac_action in CLIMATE_ACTIVE_ACTIONS
+            return state.state in CLIMATE_ACTIVE_STATES
 
-        # For all other entities (binary_sensor, switch, fan, input_boolean)
-        # Only "on" state counts as active
+        # binary_sensor, switch, fan, input_boolean
+        return state.state == STATE_ON
+
+    def _legacy_state_is_active(self, state_value: str) -> bool:
+        """Derive the active flag the way v0.5.0 did.
+
+        Used only for usage stores written before the flag was persisted, so
+        existing installs keep their accumulated hours on upgrade.
+        """
+        if state_value in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return False
+        if self._usage_sensor_entity_id and self._usage_sensor_entity_id.startswith(
+            "climate."
+        ):
+            return state_value in CLIMATE_ACTIVE_STATES
         return state_value == STATE_ON
 
-    @callback
+    async def _async_reconcile_usage_state(self) -> None:
+        """Align tracking state with the tracked entity's live state.
+
+        State changes that happen while HA is down raise no events, and
+        async_track_state_change_event does not fire for states that already
+        exist when the listener attaches. So a stored "active since T" can be
+        arbitrarily stale on startup.
+
+        The elapsed interval is discarded rather than credited: there is no
+        evidence about what the entity did while nothing was watching. The
+        alternative counted the entire downtime as runtime and kept counting
+        until the entity's next real state change, at which point the bogus
+        total was committed to storage permanently.
+        """
+        state = self.hass.states.get(self._usage_sensor_entity_id)
+
+        self._usage_sensor_available = state is not None and state.state not in (
+            STATE_UNAVAILABLE,
+            STATE_UNKNOWN,
+        )
+        self._last_usage_active = self._state_is_active(state)
+        self._last_usage_sensor_state = state.state if state else STATE_UNAVAILABLE
+        self._last_usage_changed = dt_util.utcnow()
+
+        await self._async_save_usage_data()
+
+        _LOGGER.debug(
+            "Reconciled usage tracking for filter %s: %s is %s (%.2f hours accrued)",
+            self._name,
+            self._usage_sensor_entity_id,
+            "active" if self._last_usage_active else "inactive",
+            self._accumulated_usage_seconds / 3600,
+        )
+
     async def _async_usage_sensor_state_changed(self, event: Event) -> None:
         """Handle state changes of the tracked usage sensor."""
         new_state = event.data.get("new_state")
-        old_state = event.data.get("old_state")
-
         if new_state is None:
             return
 
         now = dt_util.utcnow()
-        new_state_value = new_state.state
+        is_active = self._state_is_active(new_state)
+        is_available = new_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN)
 
-        # Check if previous state was active
-        was_active = self._is_usage_sensor_active(
-            self._last_usage_sensor_state, self._usage_sensor_entity_id
-        )
+        # Climate entities fire a state-change event for every attribute update
+        # -- current temperature, humidity, preset. Only a change in whether the
+        # entity is *running* affects the accounting, so ignore the rest instead
+        # of writing storage dozens of times an hour.
+        if (
+            is_active == self._last_usage_active
+            and is_available == self._usage_sensor_available
+        ):
+            self._last_usage_sensor_state = new_state.state
+            return
 
-        # Handle unavailable/unknown states
-        if new_state_value in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            self._usage_sensor_available = False
+        if not is_available:
             _LOGGER.warning(
                 "Usage sensor %s for filter %s is unavailable, pausing usage tracking",
                 self._usage_sensor_entity_id,
                 self._name,
             )
-            # Save current state before pausing
-            if self._last_usage_changed and was_active:
-                # Calculate accumulated time up to now
-                time_delta = (now - self._last_usage_changed).total_seconds()
-                self._accumulated_usage_seconds += time_delta
-
-            self._last_usage_changed = now
-            self._last_usage_sensor_state = new_state_value
-            await self._async_save_usage_data()
-            self.schedule_update_ha_state()
-            return
-
-        # Sensor is available again
-        if not self._usage_sensor_available:
-            self._usage_sensor_available = True
+        elif not self._usage_sensor_available:
             _LOGGER.info(
                 "Usage sensor %s for filter %s is available again",
                 self._usage_sensor_entity_id,
                 self._name,
             )
 
-        # Calculate accumulated time since last update if sensor was active
-        if self._last_usage_changed and was_active:
+        # Credit the interval that just ended, if it was an active one.
+        if self._last_usage_active and self._last_usage_changed:
             time_delta = (now - self._last_usage_changed).total_seconds()
             self._accumulated_usage_seconds += time_delta
             _LOGGER.debug(
@@ -379,15 +433,13 @@ class BaseFilterEntity(Generic[TMeta]):
                 self._accumulated_usage_seconds / 3600,
             )
 
-        # Update state
+        self._usage_sensor_available = is_available
+        self._last_usage_active = is_active
+        self._last_usage_sensor_state = new_state.state
         self._last_usage_changed = now
-        self._last_usage_sensor_state = new_state_value
 
-        # Save to storage
         await self._async_save_usage_data()
-
-        # Update entity state
-        self.schedule_update_ha_state()
+        self.async_write_ha_state()
 
     async def _async_save_usage_data(self) -> None:
         """Save usage tracking data to storage."""
@@ -397,6 +449,7 @@ class BaseFilterEntity(Generic[TMeta]):
             self._accumulated_usage_seconds,
             self._last_usage_changed,
             self._last_usage_sensor_state,
+            self._last_usage_active,
         )
 
     @property
@@ -437,7 +490,7 @@ class BaseFilterEntity(Generic[TMeta]):
             self._usage_sensor_entity_id
             and self._last_usage_changed
             and self._usage_sensor_available
-            and self._is_usage_sensor_active(self._last_usage_sensor_state, self._usage_sensor_entity_id)
+            and self._last_usage_active
         ):
             time_delta = (dt_util.utcnow() - self._last_usage_changed).total_seconds()
             return self._accumulated_usage_seconds + time_delta

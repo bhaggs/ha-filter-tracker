@@ -21,6 +21,7 @@ from .const import (
     ATTR_USAGE_HOURS,
     ATTR_ADJUST_HOURS,
     CONF_USAGE_SENSOR,
+    DATA_CALENDAR_OWNER,
     DATA_ENTRIES,
     get_usage_update_signal,
 )
@@ -146,6 +147,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entries: dict = domain_data.get(DATA_ENTRIES, {})
         entries.pop(entry.entry_id, None)
 
+        # The shared calendar was removed along with this entry's platforms.
+        # Releasing ownership lets the next setup recreate it -- which for a
+        # reload is this same entry, moments from now.
+        if domain_data.get(DATA_CALENDAR_OWNER) == entry.entry_id:
+            domain_data[DATA_CALENDAR_OWNER] = None
+
         if not entries:
             await _async_unregister_services(hass)
             hass.data.pop(DOMAIN, None)
@@ -163,6 +170,19 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     await async_remove_install_store(hass, entry.entry_id)
     await async_remove_usage_store(hass, entry.entry_id)
+
+    # If this entry owned the shared calendar, unload has just released it and
+    # the entity is gone. Re-home it onto a surviving filter, otherwise the
+    # calendar stays missing until Home Assistant restarts.
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None or domain_data.get(DATA_CALENDAR_OWNER) is not None:
+        return
+
+    for other in hass.config_entries.async_loaded_entries(DOMAIN):
+        if other.entry_id != entry.entry_id:
+            _LOGGER.debug("Re-homing Filter Tracker calendar onto %s", other.entry_id)
+            hass.config_entries.async_schedule_reload(other.entry_id)
+            break
 
 
 def _ensure_domain_data(hass: HomeAssistant) -> dict:
@@ -285,6 +305,7 @@ async def _async_handle_set_usage_time(hass: HomeAssistant, call: ServiceCall) -
             "accumulated_seconds": 0.0,
             "usage_sensor_last_changed": None,
             "last_sensor_state": "off",
+            "last_active": False,
         }
 
     current_seconds = usage_data.get("accumulated_seconds", 0.0)
@@ -318,6 +339,7 @@ async def _async_handle_set_usage_time(hass: HomeAssistant, call: ServiceCall) -
         accumulated_seconds=new_seconds,
         last_changed=dt_util.utcnow(),
         last_state=usage_data.get("last_sensor_state", "off"),
+        last_active=bool(usage_data.get("last_active")),
     )
 
     # Dispatch signal to update entities
@@ -329,6 +351,7 @@ async def _async_handle_set_usage_time(hass: HomeAssistant, call: ServiceCall) -
             "accumulated_seconds": new_seconds,
             "usage_sensor_last_changed": dt_util.utcnow(),
             "last_sensor_state": usage_data.get("last_sensor_state", "off"),
+            "last_active": bool(usage_data.get("last_active")),
         },
     )
 
