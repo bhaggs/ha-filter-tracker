@@ -125,9 +125,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.runtime_data = FilterTrackerData(install_datetime=install_datetime)
 
+    # Standard HA pattern: a config change reloads the entry, rebuilding every
+    # entity from the new configuration. This replaces a bespoke dispatcher that
+    # pushed config into each live entity -- which had every entity redundantly
+    # updating the same device, and could not create or remove the usage-time
+    # entity when a usage sensor was added or removed.
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
     await _async_register_services(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the entry so its entities pick up the new configuration."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from homeassistant.util import dt as dt_util
 
-from .conftest import setup_fixture, stored_accumulated_seconds
+from .conftest import setup_fixture, stored_accumulated_seconds, submit_options
 
 USAGE_SENSOR = "sensor.bedroom_purifier_usage_time"
 
@@ -160,12 +160,13 @@ async def test_only_one_entity_writes_usage_data(hass, hass_storage):
 
     Counting writes is the direct expression of "exactly one writer" -- the
     resulting corruption is timing-dependent and would make a flaky assertion.
+
+    Originally this drove the change through the config-update dispatcher
+    directly. That signal no longer exists: a config change now reloads the
+    entry, so the scenario is reached the way a user reaches it, through the
+    options flow. The property under test is unchanged.
     """
     from unittest.mock import patch
-
-    from homeassistant.helpers.dispatcher import async_dispatcher_send
-
-    from custom_components.filter_tracker.const import get_config_update_signal
 
     entry, _ = await setup_fixture(
         hass,
@@ -174,14 +175,7 @@ async def test_only_one_entity_writes_usage_data(hass, hass_storage):
         initial_states={"fan.bedroom_purifier": "off", "fan.other": "off"},
     )
 
-    # Switch the tracked entity. Add/remove triggers a reload, but a *change*
-    # goes through the dispatcher and is the path that misbehaved.
-    async_dispatcher_send(
-        hass,
-        get_config_update_signal(entry.entry_id),
-        {**entry.data, "usage_sensor": "fan.other"},
-    )
-    await hass.async_block_till_done()
+    await submit_options(hass, entry, usage_sensor="fan.other")
 
     with patch(
         "custom_components.filter_tracker.base.async_save_usage_data"

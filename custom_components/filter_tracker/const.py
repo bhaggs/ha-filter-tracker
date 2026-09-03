@@ -63,16 +63,11 @@ DATA_ENTRIES = "entries"
 # recreated when that entry reloads, and re-homed when it is deleted.
 DATA_CALENDAR_OWNER = "calendar_owner_entry_id"
 SIGNAL_INSTALL_UPDATED = "filter_tracker_install_updated"
-SIGNAL_CONFIG_UPDATED = "filter_tracker_config_updated"
 SIGNAL_USAGE_UPDATED = "filter_tracker_usage_updated"
 
 
 def get_install_update_signal(entry_id: str) -> str:
     return f"{SIGNAL_INSTALL_UPDATED}_{entry_id}"
-
-
-def get_config_update_signal(entry_id: str) -> str:
-    return f"{SIGNAL_CONFIG_UPDATED}_{entry_id}"
 
 
 def get_usage_update_signal(entry_id: str) -> str:

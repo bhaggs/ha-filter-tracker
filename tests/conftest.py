@@ -14,6 +14,21 @@ from custom_components.filter_tracker.const import DOMAIN
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 
+# Every fixture stores absolute datetimes, and almost every assertion depends on
+# how they relate to "today" -- whether a filter is expired, whether its due date
+# is still upcoming, how many days remain. Left on the real clock the suite rots:
+# tests pass when written and fail weeks later for no reason, and the nightly CI
+# cron goes red on its own. Pinning "now" makes the fixtures mean one fixed thing.
+FROZEN_NOW = "2026-08-25T12:00:00-07:00"
+
+
+@pytest.fixture(autouse=True)
+def frozen_time(freezer):
+    """Pin the clock so date-relative assertions stay stable over time."""
+    freezer.move_to(FROZEN_NOW)
+    return freezer
+
+
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
     """Make custom_components/filter_tracker loadable in every test."""
@@ -119,3 +134,40 @@ def stored_accumulated_seconds(hass_storage: dict[str, Any], fixture: dict[str, 
     if not record:
         return None
     return record["data"].get("accumulated_seconds")
+
+
+async def submit_options(hass, entry, **overrides):
+    """Open the options flow and submit it, changing only what's given.
+
+    Replicates what the frontend sends: every field the form was populated
+    with, returned unchanged unless overridden. Fields are pre-filled either by
+    `default=` or by `description={"suggested_value":}`, and both come back in a
+    real submission -- reading only one of them silently drops a field and tests
+    a scenario no user can actually produce.
+    """
+    import voluptuous as vol
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    current: dict[str, Any] = {}
+    for marker in result["data_schema"].schema:
+        value = vol.UNDEFINED
+
+        default = getattr(marker, "default", vol.UNDEFINED)
+        if default is not vol.UNDEFINED:
+            value = default() if callable(default) else default
+
+        description = getattr(marker, "description", None)
+        if isinstance(description, dict) and "suggested_value" in description:
+            value = description["suggested_value"]
+
+        if value is not vol.UNDEFINED and value not in (None, ""):
+            current[marker.schema] = value
+
+    current.update(overrides)
+    current = {k: v for k, v in current.items() if v is not None}
+
+    await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input=current
+    )
+    await hass.async_block_till_done()

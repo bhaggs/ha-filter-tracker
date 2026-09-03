@@ -1,10 +1,12 @@
 """Base classes for Filter Tracker entities.
 
-Provides shared functionality for device info, config updates, and install datetime
-tracking across sensor, binary_sensor, and button platforms.
+Provides shared functionality for device info, install datetime tracking, and
+usage-time accounting across the sensor, binary_sensor, and button platforms.
+
+Config changes are deliberately not handled here: an options edit reloads the
+config entry, which rebuilds every entity from the new configuration.
 """
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta, datetime
 import logging
@@ -14,7 +16,6 @@ from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, Event, State, callback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
@@ -25,15 +26,13 @@ from .const import (
     CONF_FILTER_TYPE,
     CONF_FILTER_SIZE,
     CONF_MANUFACTURER,
-    CONF_USAGE_SENSOR,
     ATTR_HVAC_ACTION,
     CLIMATE_ACTIVE_ACTIONS,
     CLIMATE_ACTIVE_STATES,
     get_install_update_signal,
-    get_config_update_signal,
     get_usage_update_signal,
 )
-from .tracker_data import async_load_usage_data, async_save_usage_data, async_reset_usage_data
+from .tracker_data import async_load_usage_data, async_save_usage_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,7 +57,7 @@ class BaseFilterEntity(Generic[TMeta]):
     Provides:
     - Device info management for unified device grouping
     - Install datetime tracking via dispatcher signals
-    - Config update handling via dispatcher signals
+    - Usage time tracking against a nominated entity
     - Shared properties (install_datetime, due_date)
 
     This class should be used with multiple inheritance:
@@ -107,10 +106,6 @@ class BaseFilterEntity(Generic[TMeta]):
         self._manufacturer = manufacturer or "Unknown"
         self._use_install_tracking = use_install_tracking
         self._usage_sensor_entity_id = usage_sensor_entity_id
-        self._remove_install_listener: Callable[[], None] | None = None
-        self._remove_config_listener: Callable[[], None] | None = None
-        self._remove_usage_listener: Callable[[], None] | None = None
-        self._remove_usage_state_listener: Callable[[], None] | None = None
 
         # Usage tracking state
         self._accumulated_usage_seconds: float = 0.0
@@ -120,10 +115,8 @@ class BaseFilterEntity(Generic[TMeta]):
         self._usage_sensor_available: bool = True
 
         # Only the usage-time sensor is constructed with a tracked entity, and
-        # only it should ever subscribe to one or write the usage store. Every
-        # entity receives the config-update signal, so without this flag a
-        # change of usage sensor turned all of them into trackers, racing
-        # read-modify-write on a single file.
+        # only it may subscribe to one or write the usage store -- one writer
+        # per store, never several racing read-modify-write on one file.
         self._tracks_usage: bool = usage_sensor_entity_id is not None
 
         # Set common entity attributes
@@ -140,54 +133,48 @@ class BaseFilterEntity(Generic[TMeta]):
             self._attr_native_unit_of_measurement = meta.unit
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to dispatcher signals when added to hass."""
+        """Subscribe to dispatcher signals when added to hass.
+
+        Config changes are not handled here: an options edit reloads the entry,
+        which rebuilds every entity from the new config. Only the button and the
+        set_filter_replaced/set_usage_time services push updates into live
+        entities, and those are what the signals below carry.
+        """
         await super().async_added_to_hass()
 
         # Subscribe to install datetime updates (if enabled)
         if self._use_install_tracking:
-            install_signal = get_install_update_signal(self._entry_id)
-            self._remove_install_listener = async_dispatcher_connect(
-                self.hass, install_signal, self._handle_install_update
+            self.async_on_remove(
+                async_dispatcher_connect(
+                    self.hass,
+                    get_install_update_signal(self._entry_id),
+                    self._handle_install_update,
+                )
             )
 
-        # Subscribe to config updates
-        config_signal = get_config_update_signal(self._entry_id)
-        self._remove_config_listener = async_dispatcher_connect(
-            self.hass, config_signal, self._handle_config_update
-        )
-
         # Subscribe to usage updates
-        usage_signal = get_usage_update_signal(self._entry_id)
-        self._remove_usage_listener = async_dispatcher_connect(
-            self.hass, usage_signal, self._handle_usage_update
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                get_usage_update_signal(self._entry_id),
+                self._handle_usage_update,
+            )
         )
 
         # Load usage tracking data and subscribe to sensor state changes
         if self._tracks_usage and self._usage_sensor_entity_id:
             await self._async_load_usage_data()
-            self._remove_usage_state_listener = async_track_state_change_event(
-                self.hass, [self._usage_sensor_entity_id], self._async_usage_sensor_state_changed
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass,
+                    [self._usage_sensor_entity_id],
+                    self._async_usage_sensor_state_changed,
+                )
             )
 
             # Always reconcile against the live state, not just for new filters:
             # nothing else corrects a stale stored timestamp after a restart.
             await self._async_reconcile_usage_state()
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Unsubscribe from dispatcher signals when removed from hass."""
-        await super().async_will_remove_from_hass()
-        if self._remove_install_listener:
-            self._remove_install_listener()
-            self._remove_install_listener = None
-        if self._remove_config_listener:
-            self._remove_config_listener()
-            self._remove_config_listener = None
-        if self._remove_usage_listener:
-            self._remove_usage_listener()
-            self._remove_usage_listener = None
-        if self._remove_usage_state_listener:
-            self._remove_usage_state_listener()
-            self._remove_usage_state_listener = None
 
     @callback
     def _handle_install_update(self, install_datetime: datetime) -> None:
@@ -199,95 +186,6 @@ class BaseFilterEntity(Generic[TMeta]):
         schedule_update_ha_state.
         """
         self._install_datetime = install_datetime
-        self.async_write_ha_state()
-
-    async def _handle_config_update(self, config_data: dict) -> None:
-        """Handle config updates from dispatcher signal."""
-        # Update internal state
-        self._name = config_data.get(CONF_NAME, self._name)
-        self._lifespan_days = config_data.get(CONF_LIFESPAN_DAYS, self._lifespan_days)
-        self._filter_type = config_data.get(CONF_FILTER_TYPE)
-        self._filter_size = config_data.get(CONF_FILTER_SIZE)
-        self._manufacturer = config_data.get(CONF_MANUFACTURER) or "Unknown"
-
-        # Check if usage sensor changed. Only the usage-time sensor tracks one;
-        # the other entities receive this signal too and must not adopt it.
-        new_usage_sensor = config_data.get(CONF_USAGE_SENSOR)
-        # Normalize empty string to None for proper comparison
-        if new_usage_sensor == "":
-            new_usage_sensor = None
-        if self._tracks_usage and new_usage_sensor != self._usage_sensor_entity_id:
-            old_usage_sensor = self._usage_sensor_entity_id  # Save for later comparison
-
-            # Unsubscribe from old sensor
-            if self._remove_usage_state_listener:
-                self._remove_usage_state_listener()
-                self._remove_usage_state_listener = None
-
-            # Reset usage data ONLY when removing sensor (not when changing it)
-            if self._usage_sensor_entity_id and not new_usage_sensor:
-                _LOGGER.info(
-                    "Usage sensor removed for filter %s, resetting usage data to 0",
-                    self._name
-                )
-                await async_reset_usage_data(self.hass, self._entry_id)
-                self._accumulated_usage_seconds = 0.0
-                self._last_usage_changed = None
-                self._last_usage_sensor_state = "off"
-            elif old_usage_sensor and new_usage_sensor:
-                _LOGGER.info(
-                    "Usage sensor changed for filter %s from %s to %s, preserving usage data",
-                    self._name, old_usage_sensor, new_usage_sensor
-                )
-            elif not old_usage_sensor and new_usage_sensor:
-                # Adding a usage sensor where there wasn't one
-                _LOGGER.info(
-                    "Usage sensor added for filter %s: %s",
-                    self._name,
-                    new_usage_sensor
-                )
-
-            # Update to new sensor
-            self._usage_sensor_entity_id = new_usage_sensor
-
-            # Subscribe to new sensor if provided
-            if new_usage_sensor:
-                self._remove_usage_state_listener = async_track_state_change_event(
-                    self.hass, [new_usage_sensor], self._async_usage_sensor_state_changed
-                )
-
-                # Initialize state from current sensor if this is a newly added sensor
-                if not old_usage_sensor:
-                    current_state = self.hass.states.get(new_usage_sensor)
-                    if current_state and current_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-                        self._last_usage_sensor_state = current_state.state
-                        self._last_usage_changed = dt_util.utcnow()
-                        await self._async_save_usage_data()
-
-                        _LOGGER.debug(
-                            "Initialized added usage sensor state for filter %s to %s (sensor: %s)",
-                            self._name,
-                            current_state.state,
-                            new_usage_sensor,
-                        )
-
-        # Build model string with optional size
-        model = self._filter_type
-        if self._filter_size:
-            model = f"{self._filter_type} ({self._filter_size})"
-
-        # Update device registry with new metadata
-        device_registry = dr.async_get(self.hass)
-        device = device_registry.async_get_device(identifiers={(DOMAIN, self._entry_id)})
-        if device:
-            device_registry.async_update_device(
-                device.id,
-                name=self._name,
-                model=model,
-                manufacturer=self._manufacturer,
-            )
-
-        # Trigger state update for lifespan changes
         self.async_write_ha_state()
 
     @callback
