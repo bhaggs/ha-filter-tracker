@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "A v0.5.0 filter whose tracked entity was ACTIVE when HA last stopped.",
+    "last_sensor_state is 'on' and usage_sensor_last_changed is weeks old.",
+    "State changes during downtime produce no events, so on restart the stored",
+    "'active since' timestamp is arbitrarily stale -- crediting the gap counts",
+    "downtime as runtime, and keeps growing until the next real state change."
+  ],
+  "entry_id": "11112222333344445555666677778888",
+  "title": "Bedroom Purifier",
+  "data": {
+    "name": "Bedroom Purifier",
+    "lifespan_days": 90,
+    "filter_type": "HEPA",
+    "manufacturer": "Coway",
+    "usage_sensor": "fan.bedroom_purifier"
+  },
+  "storage": {
+    "filter_tracker_11112222333344445555666677778888_install": {
+      "install_datetime": "2026-06-01T07:00:00+00:00"
+    },
+    "filter_tracker_11112222333344445555666677778888_usage": {
+      "accumulated_seconds": 3600.0,
+      "usage_sensor_last_changed": "2026-08-01T00:00:00+00:00",
+      "last_sensor_state": "on"
+    }
+  },
+  "expected_unique_ids": [
+    "11112222333344445555666677778888_install_date",
+    "11112222333344445555666677778888_due_date",
+    "11112222333344445555666677778888_days_remaining",
+    "11112222333344445555666677778888_life_remaining_percent",
+    "11112222333344445555666677778888_filter_type",
+    "11112222333344445555666677778888_usage_time",
+    "11112222333344445555666677778888_expired",
+    "11112222333344445555666677778888_reset_install_date"
+  ],
+  "expected_install_datetime": "2026-06-01T07:00:00+00:00",
+  "expected_accumulated_seconds": 3600.0
+}

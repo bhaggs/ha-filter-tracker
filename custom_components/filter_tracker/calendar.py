@@ -18,6 +18,7 @@ from .const import (
     CONF_LIFESPAN_DAYS,
     CONF_FILTER_TYPE,
     CONF_FILTER_SIZE,
+    DATA_CALENDAR_OWNER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,22 +50,30 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Filter Tracker calendar - creates one calendar for entire integration."""
+    """Set up Filter Tracker calendar - creates one calendar for entire integration.
 
-    # Ensure domain data exists
-    if DOMAIN not in hass.data:
-        hass.data[DOMAIN] = {}
+    One calendar covers every filter, but HA entities belong to a config entry,
+    so the first entry set up owns it. Recording *which* entry owns it lets the
+    calendar come back when that entry reloads, and be re-homed onto a surviving
+    filter when it is deleted. The previous "already created" flag only cleared
+    when the last entry unloaded, so reloading the owner left the calendar
+    permanently unavailable while other filters were still present.
+    """
+    domain_data = hass.data.setdefault(DOMAIN, {})
 
-    # Only create calendar once across all config entries
-    if "calendar_created" not in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["calendar_created"] = True
-
-        # Create single calendar showing all filters
-        calendar = FilterTrackerCalendar(hass)
-        async_add_entities([calendar])
-        _LOGGER.debug("Created integration-level Filter Tracker calendar")
+    if domain_data.get(DATA_CALENDAR_OWNER) is None:
+        domain_data[DATA_CALENDAR_OWNER] = config_entry.entry_id
+        async_add_entities([FilterTrackerCalendar(hass)])
+        _LOGGER.debug(
+            "Created integration-level Filter Tracker calendar (owner: %s)",
+            config_entry.entry_id,
+        )
     else:
-        _LOGGER.debug("Calendar already exists, skipping creation for entry %s", config_entry.entry_id)
+        _LOGGER.debug(
+            "Calendar already owned by %s, skipping creation for entry %s",
+            domain_data[DATA_CALENDAR_OWNER],
+            config_entry.entry_id,
+        )
 
 
 class FilterTrackerCalendar(CalendarEntity):

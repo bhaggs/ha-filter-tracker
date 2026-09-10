@@ -405,6 +405,10 @@ class FilterUsageTimeSensor(BaseFilterEntity[SensorMeta], SensorEntity):
             "usage_sensor": self.usage_sensor_entity_id,
             "usage_sensor_available": self.usage_sensor_available,
             "usage_sensor_state": self._last_usage_sensor_state,
+            # Whether that state currently counts as running. For a climate
+            # entity this is hvac_action, not the mode shown above, so the two
+            # legitimately disagree (mode "heat", action "idle" -> not running).
+            "usage_sensor_active": self._last_usage_active,
             "usage_sensor_last_changed": self._last_usage_changed.isoformat() if self._last_usage_changed else None,
             "accumulated_seconds": round(self.accumulated_usage_seconds, 2),
         }

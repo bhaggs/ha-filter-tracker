@@ -1,0 +1,34 @@
+{
+  "_comment": "A furnace filter tracking a climate entity -- the case where counting hvac_mode instead of hvac_action overstates runtime the most.",
+  "entry_id": "aaaa1111bbbb2222cccc3333dddd4444",
+  "title": "Furnace Filter",
+  "data": {
+    "name": "Furnace Filter",
+    "lifespan_days": 90,
+    "filter_type": "MERV13",
+    "manufacturer": "Honeywell",
+    "usage_sensor": "climate.furnace"
+  },
+  "storage": {
+    "filter_tracker_aaaa1111bbbb2222cccc3333dddd4444_install": {
+      "install_datetime": "2026-08-01T07:00:00+00:00"
+    },
+    "filter_tracker_aaaa1111bbbb2222cccc3333dddd4444_usage": {
+      "accumulated_seconds": 0.0,
+      "usage_sensor_last_changed": null,
+      "last_sensor_state": "off"
+    }
+  },
+  "expected_unique_ids": [
+    "aaaa1111bbbb2222cccc3333dddd4444_install_date",
+    "aaaa1111bbbb2222cccc3333dddd4444_due_date",
+    "aaaa1111bbbb2222cccc3333dddd4444_days_remaining",
+    "aaaa1111bbbb2222cccc3333dddd4444_life_remaining_percent",
+    "aaaa1111bbbb2222cccc3333dddd4444_filter_type",
+    "aaaa1111bbbb2222cccc3333dddd4444_usage_time",
+    "aaaa1111bbbb2222cccc3333dddd4444_expired",
+    "aaaa1111bbbb2222cccc3333dddd4444_reset_install_date"
+  ],
+  "expected_install_datetime": "2026-08-01T07:00:00+00:00",
+  "expected_accumulated_seconds": 0.0
+}
