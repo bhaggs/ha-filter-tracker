@@ -38,13 +38,56 @@ USAGE_STORE_KEY_LAST_STATE = "last_sensor_state"
 # Store read the whole file as empty and lose the user's accumulated hours.
 USAGE_STORE_KEY_LAST_ACTIVE = "last_active"
 
+# How long usage writes are debounced. A tracked fan or furnace flips between
+# running and idle many times a day, and each flip used to be its own disk
+# write. Store coalesces repeated saves within this window into one.
+#
+# The exposure is bounded: Store flushes pending writes on a clean Home
+# Assistant shutdown, and the entity flushes on removal, so only an unclean
+# crash can lose anything -- at most the interval since the last commit.
+USAGE_SAVE_DELAY_SECONDS = 30
+
+DATA_STORES = "stores"
+
+
+def _get_cached_store(hass, key: str, version: int) -> Store:
+    """Return a per-key Store, reused across calls.
+
+    Store instances must be shared: async_delay_save schedules the pending write
+    on the instance it is called on, so building a fresh Store per save would
+    leave orphaned timers and let a stale instance overwrite a newer one.
+    """
+    stores: dict[str, Store] = hass.data.setdefault(DOMAIN, {}).setdefault(
+        DATA_STORES, {}
+    )
+    store = stores.get(key)
+    if store is None:
+        store = Store(hass, version, key)
+        stores[key] = store
+    return store
+
+
+def _forget_store(hass, key: str) -> None:
+    """Drop a cached Store after its data has been removed."""
+    stores = hass.data.get(DOMAIN, {}).get(DATA_STORES)
+    if stores:
+        stores.pop(key, None)
+
+
+def _install_key(entry_id: str) -> str:
+    return f"{DOMAIN}_{entry_id}_install"
+
+
+def _usage_key(entry_id: str) -> str:
+    return f"{DOMAIN}_{entry_id}_usage"
+
 
 def _get_store(hass, entry_id: str) -> Store:
-    return Store(hass, STORE_VERSION, f"{DOMAIN}_{entry_id}_install")
+    return _get_cached_store(hass, _install_key(entry_id), STORE_VERSION)
 
 
 def _get_usage_store(hass, entry_id: str) -> Store:
-    return Store(hass, USAGE_STORE_VERSION, f"{DOMAIN}_{entry_id}_usage")
+    return _get_cached_store(hass, _usage_key(entry_id), USAGE_STORE_VERSION)
 
 
 async def async_load_install_datetime(hass, entry_id: str) -> datetime | None:
@@ -91,12 +134,14 @@ async def async_remove_install_store(hass, entry_id: str) -> None:
     """Delete the install datetime store for an entry."""
 
     await _get_store(hass, entry_id).async_remove()
+    _forget_store(hass, _install_key(entry_id))
 
 
 async def async_remove_usage_store(hass, entry_id: str) -> None:
     """Delete the usage tracking store for an entry."""
 
     await _get_usage_store(hass, entry_id).async_remove()
+    _forget_store(hass, _usage_key(entry_id))
 
 
 async def async_save_install_datetime(
@@ -174,8 +219,14 @@ async def async_save_usage_data(
     last_changed: datetime | None,
     last_state: str,
     last_active: bool = False,
+    delay: float = 0,
 ) -> None:
-    """Persist the usage tracking data."""
+    """Persist the usage tracking data.
+
+    With a delay, the write is debounced through Store, coalescing a burst of
+    state flips into one disk write. Pass delay=0 when the data must be on disk
+    immediately -- notably when the entity is being removed.
+    """
 
     store = _get_usage_store(hass, entry_id)
 
@@ -193,17 +244,21 @@ async def async_save_usage_data(
     else:
         data[USAGE_STORE_KEY_LAST_CHANGED] = None
 
-    try:
-        await store.async_save(data)
-    except Exception as err:
-        _LOGGER.error("Failed to save usage data for %s: %s", entry_id, err)
-        raise
+    if delay:
+        store.async_delay_save(lambda: data, delay)
+    else:
+        try:
+            await store.async_save(data)
+        except Exception as err:
+            _LOGGER.error("Failed to save usage data for %s: %s", entry_id, err)
+            raise
 
     _LOGGER.debug(
-        "Stored usage data for %s: %s seconds, state=%s",
+        "Stored usage data for %s: %s seconds, state=%s (delay=%s)",
         entry_id,
         accumulated_seconds,
         last_state,
+        delay,
     )
 
 

@@ -14,7 +14,11 @@ from typing import Generic, TypeVar
 
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, Event, State, callback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_time_change,
+    async_track_time_interval,
+)
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
@@ -32,9 +36,18 @@ from .const import (
     get_install_update_signal,
     get_usage_update_signal,
 )
-from .tracker_data import async_load_usage_data, async_save_usage_data
+from .tracker_data import (
+    USAGE_SAVE_DELAY_SECONDS,
+    async_load_usage_data,
+    async_save_usage_data,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+# How often the usage sensor refreshes while its tracked entity is running. Its
+# value grows continuously rather than changing on an event, so it needs a tick
+# of its own once polling is off. Nothing is written while the entity is idle.
+USAGE_REFRESH_INTERVAL = timedelta(minutes=1)
 
 
 @dataclass
@@ -120,6 +133,11 @@ class BaseFilterEntity(Generic[TMeta]):
         self._tracks_usage: bool = usage_sensor_entity_id is not None
 
         # Set common entity attributes
+        # Nothing here needs polling. The date-based values change only at
+        # midnight and get an explicit refresh; the usage sensor has its own
+        # tick. Polling re-derived the same arithmetic for every entity on every
+        # scan interval and wrote nothing new.
+        self._attr_should_poll = False
         self._attr_unique_id = f"{entry_id}_{meta.key}"
         self._attr_has_entity_name = True
         self._attr_name = meta.name
@@ -175,6 +193,42 @@ class BaseFilterEntity(Generic[TMeta]):
             # Always reconcile against the live state, not just for new filters:
             # nothing else corrects a stale stored timestamp after a restart.
             await self._async_reconcile_usage_state()
+
+            self.async_on_remove(
+                async_track_time_interval(
+                    self.hass, self._handle_usage_tick, USAGE_REFRESH_INTERVAL
+                )
+            )
+
+        # Day-based values (days remaining, life remaining, expired, the due
+        # date icon) change only when the local date does.
+        self.async_on_remove(
+            async_track_time_change(
+                self.hass, self._handle_day_rollover, hour=0, minute=0, second=0
+            )
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Flush any debounced usage write before going away.
+
+        Usage writes are debounced, which is only safe if removal commits what
+        is pending -- otherwise a reload would quietly discard the most recent
+        usage.
+        """
+        await super().async_will_remove_from_hass()
+        if self._tracks_usage:
+            await self._async_save_usage_data(immediate=True)
+
+    @callback
+    def _handle_day_rollover(self, now: datetime) -> None:
+        """Re-render at local midnight, when the date-based values change."""
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_usage_tick(self, now: datetime) -> None:
+        """Refresh the usage sensor while its tracked entity is running."""
+        if self._last_usage_active:
+            self.async_write_ha_state()
 
     @callback
     def _handle_install_update(self, install_datetime: datetime) -> None:
@@ -339,8 +393,12 @@ class BaseFilterEntity(Generic[TMeta]):
         await self._async_save_usage_data()
         self.async_write_ha_state()
 
-    async def _async_save_usage_data(self) -> None:
-        """Save usage tracking data to storage."""
+    async def _async_save_usage_data(self, *, immediate: bool = False) -> None:
+        """Save usage tracking data to storage.
+
+        Debounced by default so a cycling fan does not cause a disk write per
+        flip; pass immediate=True where the data must be committed now.
+        """
         await async_save_usage_data(
             self.hass,
             self._entry_id,
@@ -348,6 +406,7 @@ class BaseFilterEntity(Generic[TMeta]):
             self._last_usage_changed,
             self._last_usage_sensor_state,
             self._last_usage_active,
+            delay=0 if immediate else USAGE_SAVE_DELAY_SECONDS,
         )
 
     @property
