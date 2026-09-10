@@ -4,7 +4,6 @@ import logging
 
 from homeassistant import config_entries
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.selector import selector
 from homeassistant.util import dt as dt_util
 
@@ -21,7 +20,6 @@ from .const import (
     CONF_USAGE_SENSOR,
     CONF_TEMP_STORAGE_KEY,
     LIFESPAN_UNIT_FACTORS,
-    get_config_update_signal,
 )
 from .tracker_data import InstallDatetimeUnavailable, async_save_install_datetime
 from .utils import async_get_install_datetime, async_set_install_datetime
@@ -244,43 +242,15 @@ class FilterTrackerOptionsFlow(config_entries.OptionsFlow):
                 updated_data
             )
 
-            # Update the config entry
+            # Writing the entry fires the update listener registered in
+            # async_setup_entry, which reloads and rebuilds every entity from
+            # the new config. Nothing further to do here: no dispatcher fan-out,
+            # and no special case for adding or removing a usage sensor.
             self.hass.config_entries.async_update_entry(
                 self.config_entry,
                 title=new_title,
                 data=updated_data
             )
-
-            # Check if usage sensor was added or removed (requires reload to create/remove entity)
-            old_usage_sensor = self.config_entry.data.get(CONF_USAGE_SENSOR)
-            new_usage_sensor = updated_data.get(CONF_USAGE_SENSOR)
-
-            # Detect if usage sensor was added or removed (not just changed)
-            usage_sensor_added = not old_usage_sensor and new_usage_sensor
-            usage_sensor_removed = old_usage_sensor and not new_usage_sensor
-
-            if usage_sensor_added or usage_sensor_removed:
-                _LOGGER.info(
-                    "Usage sensor %s for filter %s, reloading config entry to %s usage hours entity",
-                    "added" if usage_sensor_added else "removed",
-                    updated_data.get(CONF_NAME),
-                    "create" if usage_sensor_added else "remove"
-                )
-                # Schedule reload after options flow completes
-                self.hass.async_create_task(
-                    self.hass.config_entries.async_reload(self.config_entry.entry_id)
-                )
-                # Return early - reload will handle state updates
-                return self.async_create_entry(title="", data={})
-
-            # Schedule signal dispatch to happen AFTER options flow completes
-            # This ensures the event loop can process scheduled state updates
-            signal = get_config_update_signal(self.config_entry.entry_id)
-
-            async def _send_signal():
-                async_dispatcher_send(self.hass, signal, updated_data)
-
-            self.hass.async_create_task(_send_signal())
 
             return self.async_create_entry(title="", data={})
 
