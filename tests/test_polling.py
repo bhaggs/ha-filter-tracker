@@ -185,3 +185,30 @@ async def test_pending_usage_write_survives_reload(hass, hass_storage, frozen_ti
     assert stored >= 3600 + 7200 - 60, (
         f"usage accrued before the reload was lost: {stored}s"
     )
+
+
+async def test_sensors_declare_state_class(hass, hass_storage):
+    """Long-term statistics need a state_class.
+
+    Without one the recorder keeps only short-term history, so usage hours and
+    remaining life can't be graphed over the life of a filter -- which is most
+    of the point of tracking them.
+    """
+    await setup_fixture(
+        hass,
+        hass_storage,
+        "with_usage_sensor",
+        initial_states={"fan.furnace_blower": "off"},
+    )
+
+    expected = {
+        "sensor.furnace_filter_usage_time": "total_increasing",
+        "sensor.furnace_filter_filter_life_remaining": "measurement",
+        "sensor.furnace_filter_filter_life_days_remaining": "measurement",
+    }
+    for entity_id, state_class in expected.items():
+        state = hass.states.get(entity_id)
+        assert state is not None, f"{entity_id} missing"
+        assert state.attributes.get("state_class") == state_class, (
+            f"{entity_id} has state_class {state.attributes.get('state_class')!r}"
+        )

@@ -21,7 +21,8 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import DeviceInfo, EntityCategory
+from homeassistant.const import EntityCategory
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import (
     DOMAIN,
@@ -59,6 +60,10 @@ class BaseEntityMeta:
     category: EntityCategory | None = EntityCategory.DIAGNOSTIC
     icon: str | None = None
     unit: str | None = None
+    # Long-term statistics are opt-in: without a state_class the recorder keeps
+    # only short-term history, so a filter's usage or remaining life cannot be
+    # graphed across its lifetime.
+    state_class: str | None = None
 
 
 TMeta = TypeVar('TMeta', bound=BaseEntityMeta)
@@ -149,6 +154,8 @@ class BaseFilterEntity(Generic[TMeta]):
             self._attr_icon = meta.icon
         if meta.unit:
             self._attr_native_unit_of_measurement = meta.unit
+        if meta.state_class:
+            self._attr_state_class = meta.state_class
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to dispatcher signals when added to hass.

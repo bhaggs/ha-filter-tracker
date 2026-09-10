@@ -7,11 +7,15 @@ due date, days remaining, and percentage of life remaining.
 from dataclasses import dataclass
 from datetime import datetime
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.const import EntityCategory
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 import homeassistant.util.dt as dt_util
 
 from .const import (
@@ -34,25 +38,27 @@ SENSOR_DEFINITIONS = {
         key="install_date",
         name="Filter last replaced",
         icon="mdi:calendar-clock",
-        device_class="timestamp"
+        device_class=SensorDeviceClass.TIMESTAMP
     ),
     "due_date": SensorMeta(
         key="due_date",
         name="Filter replacement due date",
         icon="mdi:calendar",
-        device_class="timestamp"
+        device_class=SensorDeviceClass.TIMESTAMP
     ),
     "days_remaining": SensorMeta(
         key="days_remaining",
         name="Filter life days remaining",
         icon="mdi:calendar",
-        unit="days"
+        unit="days",
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     "life_remaining_percent": SensorMeta(
         key="life_remaining_percent",
         name="Filter life remaining",
         icon="mdi:percent-box",
-        unit="%"
+        unit="%",
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     "filter_type": SensorMeta(
         key="filter_type",
@@ -64,16 +70,19 @@ SENSOR_DEFINITIONS = {
         key="usage_time",
         name="Usage time",
         icon="mdi:clock-outline",
-        device_class="duration",
+        device_class=SensorDeviceClass.DURATION,
         unit="h",
         category=None,
+        # Resets to zero when the filter is replaced; TOTAL_INCREASING is the
+        # state class that understands a counter restarting.
+        state_class=SensorStateClass.TOTAL_INCREASING,
     ),
 }
 
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Filter Tracker sensor from config entry."""
     install_local = config_entry.runtime_data.install_datetime

@@ -7,10 +7,13 @@ has expired based on its installation date and lifespan.
 from dataclasses import dataclass
 from datetime import datetime
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 import homeassistant.util.dt as dt_util
 
 from .const import (
@@ -31,14 +34,14 @@ BINARY_SENSOR_DEFINITIONS = {
     "expired": BinarySensorMeta(
         key="expired",
         name="Filter expired",
-        device_class="problem"
+        device_class=BinarySensorDeviceClass.PROBLEM
     ),
 }
 
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Filter Tracker binary sensor from config entry."""
     install_local = config_entry.runtime_data.install_datetime
