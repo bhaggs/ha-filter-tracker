@@ -1,40 +1,30 @@
+# Names and descriptions live in translations/en.json under "services".
+# This file carries only the field shapes and selectors.
 set_filter_replaced:
-  name: Set Filter Replaced
-  description: Update the install/replacement date for a filter.
   fields:
     device_id:
-      name: Device
-      description: Target Filter device.
       selector:
         device:
           integration: filter_tracker
     entry_id:
-      name: Config Entry
-      description: Specific config entry ID to update (alternative to selecting a device).
       example: 1234567890abcdef
-    replacement_datetime:
-      name: Replacement Date/Time
-      description: When the filter was replaced. Defaults to now if omitted.
       selector:
-        datetime: {}
+        text:
+    replacement_datetime:
+      selector:
+        datetime:
 
 set_usage_time:
-  name: Set Usage Time
-  description: Manually set or adjust the accumulated usage time for a filter.
   fields:
     device_id:
-      name: Device
-      description: Target Filter device.
       selector:
         device:
           integration: filter_tracker
     entry_id:
-      name: Config Entry
-      description: Specific config entry ID to update (alternative to selecting a device).
       example: 1234567890abcdef
+      selector:
+        text:
     usage_hours:
-      name: Usage Hours
-      description: Set usage time to this specific value in hours.
       example: 150.5
       selector:
         number:
@@ -43,8 +33,6 @@ set_usage_time:
           mode: box
           unit_of_measurement: "h"
     adjust_hours:
-      name: Adjust Hours
-      description: Adjust existing usage time by adding (positive) or subtracting (negative) hours.
       example: 10
       selector:
         number:

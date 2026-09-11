@@ -10,7 +10,6 @@ config entry, which rebuilds every entity from the new configuration.
 from dataclasses import dataclass
 from datetime import date, timedelta, datetime
 import logging
-from typing import Generic, TypeVar
 
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, Event, State, callback
@@ -21,7 +20,9 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import DeviceInfo, EntityCategory
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import (
     DOMAIN,
@@ -51,20 +52,25 @@ USAGE_REFRESH_INTERVAL = timedelta(minutes=1)
 
 
 @dataclass
-class BaseEntityMeta:
-    """Base metadata for filter entities."""
+class FilterEntityMeta:
+    """Metadata describing one filter entity.
+
+    One type covers every platform; the per-platform subclasses it replaced were
+    all empty.
+    """
     key: str
     name: str
     device_class: str | None = None
     category: EntityCategory | None = EntityCategory.DIAGNOSTIC
     icon: str | None = None
     unit: str | None = None
+    # Long-term statistics are opt-in: without a state_class the recorder keeps
+    # only short-term history, so a filter's usage or remaining life cannot be
+    # graphed across its lifetime.
+    state_class: str | None = None
 
 
-TMeta = TypeVar('TMeta', bound=BaseEntityMeta)
-
-
-class BaseFilterEntity(Generic[TMeta]):
+class BaseFilterEntity:
     """Base class with shared setup and device info for filter entities.
 
     Provides:
@@ -73,22 +79,21 @@ class BaseFilterEntity(Generic[TMeta]):
     - Usage time tracking against a nominated entity
     - Shared properties (install_datetime, due_date)
 
-    This class should be used with multiple inheritance:
-        class MySensor(BaseFilterEntity[SensorMeta], SensorEntity):
-            ...
+    Everything an entity needs comes from the config entry, so subclasses
+    normally declare only their value:
+
+        class MySensor(BaseFilterEntity, SensorEntity):
+            @property
+            def native_value(self):
+                ...
     """
 
     def __init__(
         self,
         hass: HomeAssistant,
-        entry_id: str,
-        install_datetime: datetime | None,
-        name: str,
-        lifespan_days: int,
-        filter_type: str | None,
-        filter_size: str | None,
-        manufacturer: str | None,
-        meta: TMeta,
+        config_entry: ConfigEntry,
+        meta: FilterEntityMeta,
+        *,
         use_install_tracking: bool = True,
         usage_sensor_entity_id: str | None = None,
     ) -> None:
@@ -96,27 +101,24 @@ class BaseFilterEntity(Generic[TMeta]):
 
         Args:
             hass: Home Assistant instance
-            entry_id: Config entry ID
-            install_datetime: Filter installation datetime (can be None for buttons)
-            name: Filter name
-            lifespan_days: Filter lifespan in days
-            filter_type: Type of filter
-            filter_size: Physical dimensions of filter (optional)
-            manufacturer: Filter manufacturer (optional)
-            meta: Entity metadata (SensorMeta, BinarySensorMeta, or ButtonMeta)
-            use_install_tracking: Whether to subscribe to install datetime updates
-                                  (False for button entities that produce updates)
-            usage_sensor_entity_id: Binary sensor to track for usage time (optional)
+            config_entry: The filter's config entry, the source of every
+                configured value and of the install datetime resolved at setup
+            meta: Entity metadata (key, name, device class, units, ...)
+            use_install_tracking: Whether to subscribe to install datetime
+                updates (False for the button, which produces them)
+            usage_sensor_entity_id: Entity whose runtime is tracked (optional)
         """
         super().__init__()
+        data = config_entry.data
+
         self.hass = hass
-        self._entry_id = entry_id
-        self._install_datetime = install_datetime
-        self._name = name
-        self._lifespan_days = lifespan_days
-        self._filter_type = filter_type or "Generic Filter"
-        self._filter_size = filter_size
-        self._manufacturer = manufacturer or "Unknown"
+        self._entry_id = config_entry.entry_id
+        self._install_datetime = config_entry.runtime_data.install_datetime
+        self._name = data[CONF_NAME]
+        self._lifespan_days = data.get(CONF_LIFESPAN_DAYS, 0)
+        self._filter_type = data.get(CONF_FILTER_TYPE) or "Generic Filter"
+        self._filter_size = data.get(CONF_FILTER_SIZE)
+        self._manufacturer = data.get(CONF_MANUFACTURER) or "Unknown"
         self._use_install_tracking = use_install_tracking
         self._usage_sensor_entity_id = usage_sensor_entity_id
 
@@ -138,17 +140,21 @@ class BaseFilterEntity(Generic[TMeta]):
         # tick. Polling re-derived the same arithmetic for every entity on every
         # scan interval and wrote nothing new.
         self._attr_should_poll = False
-        self._attr_unique_id = f"{entry_id}_{meta.key}"
+
+        # meta.key is frozen: it forms the unique_id, so renaming one orphans
+        # the user's existing entity and drops its recorder history.
+        self._attr_unique_id = f"{config_entry.entry_id}_{meta.key}"
         self._attr_has_entity_name = True
         self._attr_name = meta.name
         self._attr_device_class = meta.device_class
         self._attr_entity_category = meta.category
 
-        # Set sensor-specific attributes (if provided in meta)
         if meta.icon:
             self._attr_icon = meta.icon
         if meta.unit:
             self._attr_native_unit_of_measurement = meta.unit
+        if meta.state_class:
+            self._attr_state_class = meta.state_class
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to dispatcher signals when added to hass.

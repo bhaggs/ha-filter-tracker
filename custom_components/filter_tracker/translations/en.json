@@ -44,5 +44,47 @@
         }
       }
     }
+  },
+  "services": {
+    "set_filter_replaced": {
+      "name": "Set filter replaced",
+      "description": "Update the install/replacement date for a filter.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Target Filter device."
+        },
+        "entry_id": {
+          "name": "Config entry",
+          "description": "Specific config entry ID to update (alternative to selecting a device)."
+        },
+        "replacement_datetime": {
+          "name": "Replacement date/time",
+          "description": "When the filter was replaced. Defaults to now if omitted."
+        }
+      }
+    },
+    "set_usage_time": {
+      "name": "Set usage time",
+      "description": "Manually set or adjust the accumulated usage time for a filter.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Target Filter device."
+        },
+        "entry_id": {
+          "name": "Config entry",
+          "description": "Specific config entry ID to update (alternative to selecting a device)."
+        },
+        "usage_hours": {
+          "name": "Usage hours",
+          "description": "Set usage time to this specific value in hours."
+        },
+        "adjust_hours": {
+          "name": "Adjust hours",
+          "description": "Adjust existing usage time by adding (positive) or subtracting (negative) hours."
+        }
+      }
+    }
   }
 }

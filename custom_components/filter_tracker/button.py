@@ -1,32 +1,21 @@
-from dataclasses import dataclass
+"""Button platform for Filter Tracker integration."""
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.entity import EntityCategory
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import (
-    CONF_FILTER_TYPE,
-    CONF_FILTER_SIZE,
-    CONF_MANUFACTURER,
-    CONF_NAME,
-    CONF_USAGE_SENSOR,
-    get_usage_update_signal,
-)
+from .const import CONF_USAGE_SENSOR, get_usage_update_signal
 from .tracker_data import async_reset_usage_data
 from .utils import async_set_install_datetime
-from .base import BaseFilterEntity, BaseEntityMeta
+from .base import BaseFilterEntity, FilterEntityMeta
 
-@dataclass
-class ButtonMeta(BaseEntityMeta):
-    """Metadata for button entities."""
-    pass
-
+# "key" forms the unique_id and is frozen -- see sensor.py.
 BUTTON_DEFINITIONS = {
-    "reset_install_date": ButtonMeta(
+    "reset_install_date": FilterEntityMeta(
         key="reset_install_date",
         name="Filter replaced",
         icon="mdi:calendar-sync",
@@ -38,7 +27,7 @@ BUTTON_DEFINITIONS = {
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the reset button."""
     async_add_entities(
@@ -46,34 +35,25 @@ async def async_setup_entry(
             FilterResetInstallDateButton(
                 hass,
                 config_entry,
+                BUTTON_DEFINITIONS["reset_install_date"],
+                # The button produces install updates rather than consuming
+                # them, so it does not subscribe to its own signal.
+                use_install_tracking=False,
             )
         ]
     )
 
 
-class FilterResetInstallDateButton(BaseFilterEntity[ButtonMeta], ButtonEntity):
+class FilterResetInstallDateButton(BaseFilterEntity, ButtonEntity):
     """Button to reset the install date to today."""
 
-    def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry) -> None:
-        """Initialize the button."""
-        data = config_entry.data
-        super().__init__(
-            hass,
-            config_entry.entry_id,
-            None,  # Button doesn't need install_datetime
-            data[CONF_NAME],
-            0,  # lifespan not used for button
-            data.get(CONF_FILTER_TYPE),
-            data.get(CONF_FILTER_SIZE),
-            data.get(CONF_MANUFACTURER),
-            BUTTON_DEFINITIONS["reset_install_date"],
-            use_install_tracking=False,  # Button sends updates, doesn't receive them
-        )
+    def __init__(self, hass, config_entry, meta, **kwargs) -> None:
+        """Keep the config entry: pressing writes through it."""
+        super().__init__(hass, config_entry, meta, **kwargs)
         self._config_entry = config_entry
 
     async def async_press(self) -> None:
         """Handle button press to reset install date and usage time."""
-        # Reset install datetime
         await async_set_install_datetime(
             self.hass,
             self._config_entry,
