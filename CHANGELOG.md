@@ -8,9 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2026-09-22
 
 Filter Tracker has been useful for a while, but 0.5.0 had bugs that could
-silently corrupt or lose a filter's install date and usage hours — the one thing
-a tracker exists to get right. Those are fixed, and the integration now has a
-test suite that pins the behaviour so they stay fixed. That is what 1.0 marks.
+silently corrupt or lose a filter's install date and usage hours. Those are fixed, and the integration now has a
+test suite that pins the behavior so they stay fixed.
 
 ### ⚠️ Before you update
 
@@ -44,7 +43,7 @@ with the "Filter replaced" button or `filter_tracker.set_usage_time`.
 - **Thermostat runtime is measured from `hvac_action`, not `hvac_mode`.** A
   furnace left on "heat" all winter used to accrue 24 hours a day even though it
   ran for one or two. Thermostats that do not report `hvac_action` keep the old
-  mode-based behaviour.
+  mode-based behavior.
 - **Time while Home Assistant is stopped is no longer counted.** Usage used to
   keep accruing across an outage, and kept climbing afterwards until the tracked
   entity next changed state, at which point the inflated total was saved
