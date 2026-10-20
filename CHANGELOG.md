@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-20
+
 ### Added
 
 - The integration now ships its own brand icons, which Home Assistant 2026.3
@@ -127,6 +129,7 @@ with the "Filter replaced" button or `filter_tracker.set_usage_time`.
 
 Initial public beta.
 
-[Unreleased]: https://github.com/bhaggs/ha-filter-tracker/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/bhaggs/ha-filter-tracker/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/bhaggs/ha-filter-tracker/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/bhaggs/ha-filter-tracker/compare/v0.5.0-beta...v1.0.0
 [0.5.0-beta]: https://github.com/bhaggs/ha-filter-tracker/releases/tag/v0.5.0-beta
