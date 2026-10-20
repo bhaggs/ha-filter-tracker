@@ -5,6 +5,14 @@ All notable changes to Filter Tracker are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The integration now ships its own brand icons, which Home Assistant 2026.3
+  and newer use instead of fetching them from the brands repository. Older
+  versions are unaffected. (#17)
+
 ## [1.0.0] - 2026-09-22
 
 Filter Tracker has been useful for a while, but 0.5.0 had bugs that could
@@ -119,5 +127,6 @@ with the "Filter replaced" button or `filter_tracker.set_usage_time`.
 
 Initial public beta.
 
+[Unreleased]: https://github.com/bhaggs/ha-filter-tracker/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/bhaggs/ha-filter-tracker/compare/v0.5.0-beta...v1.0.0
 [0.5.0-beta]: https://github.com/bhaggs/ha-filter-tracker/releases/tag/v0.5.0-beta
