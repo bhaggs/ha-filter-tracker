@@ -70,6 +70,17 @@ def check(label: str, cond: bool, extra: str = "") -> None:
         FAILED.append(label)
 
 
+def skip(label: str, reason: str) -> None:
+    print(f"  SKIP  {label}   {reason}")
+
+
+# Home Assistant's fallback for custom entities that don't opt in to in-place
+# renames, and the private helper that decides it, go away in 2027.11. From
+# then on every rename is in place, so the checks of that decision have nothing
+# left to check.
+READD_FALLBACK_GONE = not hasattr(entity, "_entity_class_requires_readd")
+
+
 class ErrorLog(logging.Handler):
     """Collect ERROR records, so a hook that raises can't pass silently.
 
@@ -151,6 +162,9 @@ async def rename(hass: HomeAssistant, old: str, new: str) -> None:
 
 async def s1_opt_in_covers_every_entity_class():
     """HA decides per class whether a rename can happen in place."""
+    if READD_FALLBACK_GONE:
+        skip("per-class opt-in", "this Home Assistant renames every entity in place")
+        return
     classes = {
         cls
         for module in (base, binary_sensor, button, calendar, sensor)
@@ -273,6 +287,9 @@ async def s3_control_without_opt_in():
 
     Shows that s2's zero removals is down to the hook, not to the scenario.
     """
+    if READD_FALLBACK_GONE:
+        skip("control without the hook", "this Home Assistant has no re-add path left")
+        return
     errors = ErrorLog()
     logging.getLogger().addHandler(errors)
     hook = base.BaseFilterEntity.__dict__["async_entity_id_changed"]

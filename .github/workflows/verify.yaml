@@ -1,0 +1,45 @@
+name: Verify against latest Home Assistant
+
+# The pytest suite runs on the Home Assistant release that
+# pytest-homeassistant-custom-component pins, which trails new releases.
+# This runs scripts/verify_integration.py against the newest stable release
+# instead, and daily, so a new release is checked without waiting for a push.
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 0 * * *"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install the latest Home Assistant
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade homeassistant
+
+      # If the newest release needs a newer Python than this job has, pip
+      # silently falls back to an older release. Fail instead, so the check
+      # never quietly stops tracking the latest version.
+      - name: Confirm it is the latest release
+        run: |
+          installed=$(python -c "from homeassistant.const import __version__; print(__version__)")
+          latest=$(curl -fsS https://pypi.org/pypi/homeassistant/json | python -c "import json, sys; print(json.load(sys.stdin)['info']['version'])")
+          echo "installed $installed, latest on PyPI $latest"
+          if [ "$installed" != "$latest" ]; then
+            echo "::error::Installed Home Assistant $installed, but the latest is $latest. Raise python-version in this workflow."
+            exit 1
+          fi
+
+      - name: Verify
+        run: python scripts/verify_integration.py
