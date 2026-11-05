@@ -1,6 +1,7 @@
 {
   "domain": "filter_tracker",
   "name": "Filter Tracker",
+  "categories": ["climate", "water.water_treatment"],
   "codeowners": ["@bhaggs"],
   "config_flow": true,
   "dependencies": [],
