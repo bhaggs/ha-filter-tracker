@@ -3,14 +3,12 @@ name: Verify against latest Home Assistant
 # The pytest suite runs on the Home Assistant release that
 # pytest-homeassistant-custom-component pins, which trails new releases.
 # This runs scripts/verify_integration.py against the newest stable release
-# instead, and daily, so a new release is checked without waiting for a push.
+# instead, whenever there is new work to check.
 
 on:
   workflow_dispatch:
   push:
   pull_request:
-  schedule:
-    - cron: "0 0 * * *"
 
 jobs:
   verify:
