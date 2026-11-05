@@ -13,11 +13,14 @@ import logging
 
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, Event, State, callback
+from homeassistant.helpers import entity_registry as er, issue_registry as ir
 from homeassistant.helpers.event import (
+    async_track_entity_registry_updated_event,
     async_track_state_change_event,
     async_track_time_change,
     async_track_time_interval,
 )
+from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.config_entries import ConfigEntry
@@ -31,10 +34,13 @@ from .const import (
     CONF_FILTER_TYPE,
     CONF_FILTER_SIZE,
     CONF_MANUFACTURER,
+    CONF_USAGE_SENSOR,
     ATTR_HVAC_ACTION,
     CLIMATE_ACTIVE_ACTIONS,
     CLIMATE_ACTIVE_STATES,
+    ISSUE_MISSING_USAGE_SENSOR,
     get_install_update_signal,
+    get_missing_usage_sensor_issue_id,
     get_usage_update_signal,
 )
 from .tracker_data import (
@@ -128,6 +134,9 @@ class BaseFilterEntity:
         self._last_usage_sensor_state: str = "off"
         self._last_usage_active: bool = False
         self._usage_sensor_available: bool = True
+        # None until the first check: a repair issue left over from a previous
+        # run must be cleared even when the sensor turns out to be fine.
+        self._usage_sensor_missing: bool | None = None
 
         # Only the usage-time sensor is constructed with a tracked entity, and
         # only it may subscribe to one or write the usage store -- one writer
@@ -200,6 +209,21 @@ class BaseFilterEntity:
             # nothing else corrects a stale stored timestamp after a restart.
             await self._async_reconcile_usage_state()
 
+            # Whether the tracked entity still exists is decided by the entity
+            # registry, plus the state machine for entities it doesn't know.
+            # Only check once HA has started: at boot the tracked entity's own
+            # integration may simply not have loaded yet.
+            self.async_on_remove(
+                async_track_entity_registry_updated_event(
+                    self.hass,
+                    self._usage_sensor_entity_id,
+                    self._handle_usage_sensor_registry_update,
+                )
+            )
+            self.async_on_remove(
+                async_at_started(self.hass, self._async_check_usage_sensor_exists)
+            )
+
             self.async_on_remove(
                 async_track_time_interval(
                     self.hass, self._handle_usage_tick, USAGE_REFRESH_INTERVAL
@@ -224,6 +248,13 @@ class BaseFilterEntity:
         await super().async_will_remove_from_hass()
         if self._tracks_usage:
             await self._async_save_usage_data(immediate=True)
+            # The issue describes this entity's view of the tracked sensor, so it
+            # goes with the entity: on deletion, on a reload that drops the usage
+            # sensor, and on shutdown. If it still applies, the check after the
+            # next start raises it again.
+            ir.async_delete_issue(
+                self.hass, DOMAIN, get_missing_usage_sensor_issue_id(self._entry_id)
+            )
 
     @callback
     def async_entity_id_changed(self, old_entity_id: str) -> None:
@@ -236,6 +267,82 @@ class BaseFilterEntity:
         there is nothing to move. Older HA versions never call this.
         """
         super().async_entity_id_changed(old_entity_id)
+
+    @callback
+    def _handle_usage_sensor_registry_update(self, event: Event) -> None:
+        """React to the tracked entity being renamed, removed, or disabled."""
+        data = event.data
+        if data["action"] == "update" and "old_entity_id" in data:
+            # Renamed: follow it rather than report it missing. Updating the
+            # entry reloads it, which rebuilds this entity tracking the new ID;
+            # the accumulated hours are keyed on the entry, so they carry over.
+            entry = self.hass.config_entries.async_get_entry(self._entry_id)
+            if entry is not None:
+                _LOGGER.info(
+                    "Usage sensor for filter %s was renamed from %s to %s, following it",
+                    self._name,
+                    data["old_entity_id"],
+                    data["entity_id"],
+                )
+                self.hass.config_entries.async_update_entry(
+                    entry, data={**entry.data, CONF_USAGE_SENSOR: data["entity_id"]}
+                )
+            return
+
+        if data["action"] == "remove":
+            # The state may outlive the registry entry by a moment; the registry
+            # is what says the entity is gone.
+            self._async_set_usage_sensor_missing(True)
+            return
+
+        self._async_check_usage_sensor_exists()
+
+    @callback
+    def _async_check_usage_sensor_exists(self, _hass: HomeAssistant | None = None) -> None:
+        """Raise or clear the repair issue from where the tracked entity stands.
+
+        A registered entity counts as present unless it is disabled, even with
+        no state: that is its integration reloading or still starting, which
+        the usage sensor already treats as unavailable. Entities the registry
+        doesn't know about exist only as states.
+        """
+        entity_id = self._usage_sensor_entity_id
+        registry_entry = er.async_get(self.hass).async_get(entity_id)
+        if registry_entry is not None:
+            missing = registry_entry.disabled_by is not None
+        else:
+            missing = self.hass.states.get(entity_id) is None
+        self._async_set_usage_sensor_missing(missing)
+
+    @callback
+    def _async_set_usage_sensor_missing(self, missing: bool) -> None:
+        if missing == self._usage_sensor_missing:
+            return
+        self._usage_sensor_missing = missing
+
+        issue_id = get_missing_usage_sensor_issue_id(self._entry_id)
+        if not missing:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+
+        _LOGGER.warning(
+            "Usage sensor %s for filter %s no longer exists or is disabled; "
+            "usage hours are not being counted",
+            self._usage_sensor_entity_id,
+            self._name,
+        )
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_MISSING_USAGE_SENSOR,
+            translation_placeholders={
+                "filter": self._name,
+                "entity_id": self._usage_sensor_entity_id or "",
+            },
+        )
 
     @callback
     def _handle_day_rollover(self, now: datetime) -> None:
@@ -363,6 +470,11 @@ class BaseFilterEntity:
         new_state = event.data.get("new_state")
         if new_state is None:
             return
+
+        # A state appearing settles it for entities the registry doesn't know;
+        # for registered ones the check consults the registry as usual.
+        if self._usage_sensor_missing:
+            self._async_check_usage_sensor_exists()
 
         now = dt_util.utcnow()
         is_active = self._state_is_active(new_state)

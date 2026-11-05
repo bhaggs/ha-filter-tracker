@@ -72,3 +72,12 @@ def get_install_update_signal(entry_id: str) -> str:
 
 def get_usage_update_signal(entry_id: str) -> str:
     return f"{SIGNAL_USAGE_UPDATED}_{entry_id}"
+
+
+# Repair issue raised when a filter's usage sensor no longer exists. Issues are
+# identified by domain and issue ID, so the entry ID keeps one per filter.
+ISSUE_MISSING_USAGE_SENSOR = "missing_usage_sensor"
+
+
+def get_missing_usage_sensor_issue_id(entry_id: str) -> str:
+    return f"{ISSUE_MISSING_USAGE_SENSOR}_{entry_id}"

@@ -310,10 +310,56 @@ async def s3_control_without_opt_in():
         logging.getLogger().removeHandler(errors)
 
 
+async def s4_missing_usage_sensor():
+    """The repair issue for a usage sensor that's gone, and following a rename."""
+    from custom_components.filter_tracker.const import get_missing_usage_sensor_issue_id
+
+    hass = await new_hass()
+    await async_setup_component(hass, DOMAIN, {})
+    registry = er.async_get(hass)
+    registry.async_get_or_create(
+        "binary_sensor", "test", "furnace", suggested_object_id="furnace_running"
+    )
+    hass.states.async_set(USAGE_SOURCE, STATE_OFF)
+    entry = await add_filter(hass, "Furnace", USAGE_SOURCE)
+    issues = issue_registry.async_get(hass)
+    issue_id = get_missing_usage_sensor_issue_id(entry.entry_id)
+
+    check("no issue while the sensor exists", issues.async_get_issue(DOMAIN, issue_id) is None)
+
+    renamed = "binary_sensor.attic_furnace_running"
+    registry.async_update_entity(USAGE_SOURCE, new_entity_id=renamed)
+    hass.states.async_remove(USAGE_SOURCE)
+    hass.states.async_set(renamed, STATE_OFF)
+    await hass.async_block_till_done()
+    check(
+        "a renamed sensor is followed",
+        entry.data.get("usage_sensor") == renamed,
+        f"usage_sensor={entry.data.get('usage_sensor')}",
+    )
+    check("following a rename raises no issue", issues.async_get_issue(DOMAIN, issue_id) is None)
+
+    registry.async_remove(renamed)
+    await hass.async_block_till_done()
+    found = issues.async_get_issue(DOMAIN, issue_id)
+    check("deleting the sensor raises the issue", found is not None)
+    if found is not None:
+        check(
+            "the issue names the filter and the entity",
+            found.translation_placeholders == {"filter": "Furnace", "entity_id": renamed},
+            str(found.translation_placeholders),
+        )
+
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    check("deleting the filter removes the issue", issues.async_get_issue(DOMAIN, issue_id) is None)
+
+
 SECTIONS = [
     ("1. every entity class opts in to in-place renames", s1_opt_in_covers_every_entity_class),
     ("2. renaming a running filter's entities", s2_rename_in_place),
     ("3. control: the same renames without the hook", s3_control_without_opt_in),
+    ("4. a usage sensor that is renamed, then deleted", s4_missing_usage_sensor),
 ]
 
 
