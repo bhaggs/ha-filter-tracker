@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Filter Tracker is listed under the Climate and Water treatment categories,
+  which the Home Assistant 2026.11 Marketplace uses for browsing. (#21)
+
+### Changed
+
+- Renaming a Filter Tracker entity's ID on Home Assistant 2026.11 or newer now
+  updates it in place instead of removing and re-adding it. (#21)
+- The README covers installing from the Marketplace, which replaces HACS in
+  Home Assistant 2026.11. HACS installs migrate automatically. (#21)
+
 ## [1.0.1] - 2026-10-20
 
 ### Added

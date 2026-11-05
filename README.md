@@ -24,7 +24,21 @@ Home Assistant **2025.1.0** or later.
 
 ## Installation
 
-### HACS (Recommended)
+### Marketplace (Home Assistant 2026.11 and later, recommended)
+
+1. Go to **Settings** > **Marketplace**
+2. In the upper-right corner, select **Add from link**
+3. Under **GitHub link**, enter `bhaggs/ha-filter-tracker` and select **Add**. Custom repositories need a GitHub connection; if you haven't connected GitHub yet, the Marketplace walks you through it
+4. On Filter Tracker's page, select **Install**, check the version, and select **Install** again
+5. The setup page opens as soon as the install finishes, with no restart. If you close it, add Filter Tracker later under **Settings** > **Devices & services**
+
+Updates still need a restart to apply; a repair under **Settings** > **System** > **Repairs** reminds you and can restart for you.
+
+Only stable releases are offered by default. To try betas, go to **Settings** > **Devices & services** > **Marketplace**, open Filter Tracker's device page, enable the **Pre-release** entity (it starts disabled), and turn it on.
+
+**Already installed with HACS?** Nothing to do. When Home Assistant 2026.11 first starts, the Marketplace takes over everything HACS installed, and Filter Tracker keeps receiving updates.
+
+### HACS (Home Assistant 2026.10 and earlier)
 
 1. Open HACS in your Home Assistant instance
 2. Go to "Integrations"

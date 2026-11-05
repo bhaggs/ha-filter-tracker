@@ -226,6 +226,18 @@ class BaseFilterEntity:
             await self._async_save_usage_data(immediate=True)
 
     @callback
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Keep running through an entity ID rename (Home Assistant 2026.11+).
+
+        Overriding this opts in to renaming in place. Without it, overriding
+        the lifecycle hooks above makes HA remove and re-add the entity on every
+        rename, and that fallback goes away in 2027.11. Nothing here is keyed on
+        this entity's own entity_id -- stores and signals use the entry ID -- so
+        there is nothing to move. Older HA versions never call this.
+        """
+        super().async_entity_id_changed(old_entity_id)
+
+    @callback
     def _handle_day_rollover(self, now: datetime) -> None:
         """Re-render at local midnight, when the date-based values change."""
         self.async_write_ha_state()
