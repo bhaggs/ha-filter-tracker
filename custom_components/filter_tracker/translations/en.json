@@ -86,5 +86,11 @@
         }
       }
     }
+  },
+  "issues": {
+    "missing_usage_sensor": {
+      "title": "Usage sensor for {filter} is missing",
+      "description": "Filter Tracker counts usage hours for **{filter}** while `{entity_id}` is running, but that entity no longer exists or is disabled. Usage hours have stopped counting; the hours already recorded are kept.\n\nTo fix this, go to **Settings** > **Devices & services** > **Filter Tracker**, select **Configure** on {filter}, and choose a different usage sensor or clear the field. If `{entity_id}` comes back or is re-enabled, this issue clears on its own."
+    }
   }
 }

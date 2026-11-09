@@ -185,6 +185,14 @@ Notes:
 - Changing the tracked entity, or clearing it entirely, **preserves** the
   accumulated hours. Use the "Filter replaced" button or `set_usage_time` to
   reset them deliberately.
+- Renaming the tracked entity's ID is followed automatically: the filter
+  switches to the new ID and keeps its hours.
+- If the tracked entity is deleted or disabled, a repair appears under
+  **Settings** > **System** > **Repairs** naming the filter, because usage hours
+  can no longer be counted. It clears on its own when the entity comes back, or
+  when you choose a different usage sensor (or none) from the filter's
+  **Configure** screen. The check waits until Home Assistant has finished
+  starting, so an entity whose integration loads late isn't reported.
 
 ## Long-Term Statistics
 
@@ -362,12 +370,14 @@ it to right now.
 
 ### Usage time not accumulating
 
-1. Check the `usage_sensor_active` attribute on the Usage Time sensor — this is
+1. Check **Settings** > **System** > **Repairs** for a "Usage sensor for … is
+   missing" issue: the tracked entity was deleted or disabled
+2. Check the `usage_sensor_active` attribute on the Usage Time sensor — this is
    the value that actually drives accumulation
-2. For a thermostat, `usage_sensor_active` follows `hvac_action`. If the mode is
+3. For a thermostat, `usage_sensor_active` follows `hvac_action`. If the mode is
    `heat` but the system is idle, nothing accrues — this is intended
-3. Check `usage_sensor_available` is `true`
-4. Verify the tracked entity's domain is supported (binary_sensor, switch,
+4. Check `usage_sensor_available` is `true`
+5. Verify the tracked entity's domain is supported (binary_sensor, switch,
    input_boolean, fan, climate)
 
 ### Usage hours look too high after upgrading from 0.5.x

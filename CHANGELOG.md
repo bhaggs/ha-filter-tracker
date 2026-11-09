@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Filter Tracker is listed under the Climate and Water treatment categories,
   which the Home Assistant 2026.11 Marketplace uses for browsing. (#21)
+- A repair issue appears when a filter's usage sensor is deleted or disabled,
+  instead of usage hours silently stopping. It clears on its own when the
+  entity returns or the filter is pointed at another sensor. (#22)
+- Renaming a usage sensor's entity ID no longer breaks tracking: the filter
+  follows the new ID and keeps its hours. (#22)
 
 ### Changed
 
